@@ -2537,7 +2537,7 @@ def normalize_language_code(lang_string):
         return LANGUAGE_MAP[lang_clean]
     return 'und'
 
-def find_subtitle_files(video_path):
+def find_subtitle_files(video_path: Path) -> List[Tuple[Path, str]]:
     """Find subtitle files associated with a video.
     
     Finds all subtitle files (.srt, .ass, .ssa) that match the video name,
@@ -2554,14 +2554,23 @@ def find_subtitle_files(video_path):
     subtitle_files = []
     found_paths = set()
     
-    for file_path in video_dir.iterdir():
-        if not file_path.is_file() or file_path.suffix.lower() not in SUBTITLE_EXTENSIONS:
-            continue
-        base_name, lang_part = extract_language_from_filename(file_path.name)
-        if video_stem.strip().lower() == base_name.strip().lower():
-            if file_path not in found_paths:
-                subtitle_files.append((file_path, lang_part))
-                found_paths.add(file_path)
+    try:
+        for file_path in video_dir.iterdir():
+            try:
+                if not file_path.is_file() or file_path.suffix.lower() not in SUBTITLE_EXTENSIONS:
+                    continue
+                base_name, lang_part = extract_language_from_filename(file_path.name)
+                if video_stem.strip().lower() == base_name.strip().lower():
+                    if file_path not in found_paths:
+                        subtitle_files.append((file_path, lang_part))
+                        found_paths.add(file_path)
+            except (OSError, PermissionError):
+                # Egyedi fájl hiba - folytatjuk a következővel
+                continue
+    except (OSError, PermissionError, FileNotFoundError):
+        # Könyvtár hozzáférési hiba - üres lista visszaadása
+        return []
+    
     return subtitle_files
 
 SUBTITLE_VALIDATION_SAMPLE_BYTES = 200_000
@@ -2594,7 +2603,7 @@ def _read_subtitle_preview(file_path, limit=SUBTITLE_VALIDATION_SAMPLE_BYTES):
         text = data.decode('latin-1', errors='ignore')
     return text.replace('\x00', '')
 
-def is_valid_subtitle_file(file_path):
+def is_valid_subtitle_file(file_path: Path) -> Tuple[bool, str]:
     """Validate subtitle file content and format.
     
     Checks file size, readability, and format-specific headers/patterns
@@ -4967,7 +4976,7 @@ def validate_encoded_video_vlc(video_path, encoder='av1_nvenc', stop_event=None,
         else:
             print(f"  🛑 DEBUG: Temp MEGŐRIZVE: {temp_dir}")
 
-def find_video_files(root_dir, include_av1=False):
+def find_video_files(root_dir: Union[str, Path], include_av1: bool = False) -> List[Path]:
     """Recursively find video files in a directory.
     
     Args:
@@ -4979,23 +4988,33 @@ def find_video_files(root_dir, include_av1=False):
     """
     video_files = []
     root_path = Path(root_dir)
-    for file_path in root_path.rglob('*'):
-        if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
-            # Kihagyjuk a .ab-av1-* almappákban lévő fájlokat (ab-av1 temp fájlok)
-            path_parts = file_path.parts
-            if any('.ab-av1-' in part for part in path_parts):
+    
+    try:
+        for file_path in root_path.rglob('*'):
+            try:
+                if file_path.is_file() and file_path.suffix.lower() in VIDEO_EXTENSIONS:
+                    # Kihagyjuk a .ab-av1-* almappákban lévő fájlokat (ab-av1 temp fájlok)
+                    path_parts = file_path.parts
+                    if any('.ab-av1-' in part for part in path_parts):
+                        continue
+                    
+                    if include_av1:
+                        # Ha include_av1=True, akkor minden videó fájlt hozzáadunk
+                        video_files.append(file_path)
+                    else:
+                        # Alapértelmezett: kihagyjuk az .av1 fájlokat
+                        if not file_path.stem.endswith('.av1'):
+                            video_files.append(file_path)
+            except (OSError, PermissionError):
+                # Egyedi fájl hozzáférési hiba - folytatjuk a következővel
                 continue
-            
-            if include_av1:
-                # Ha include_av1=True, akkor minden videó fájlt hozzáadunk
-                video_files.append(file_path)
-            else:
-                # Alapértelmezett: kihagyjuk az .av1 fájlokat
-                if not file_path.stem.endswith('.av1'):
-                    video_files.append(file_path)
+    except (OSError, PermissionError, FileNotFoundError):
+        # Root könyvtár hozzáférési hiba - üres lista visszaadása
+        return []
+    
     return video_files
 
-def get_output_filename(input_path, source_root, dest_root):
+def get_output_filename(input_path: Path, source_root: Optional[Union[str, Path]], dest_root: Optional[Union[str, Path]]) -> Optional[Path]:
     """Determine the output file path.
     
     Args:
@@ -5004,21 +5023,28 @@ def get_output_filename(input_path, source_root, dest_root):
         dest_root: Destination root directory (Path or None).
         
     Returns:
-        Path: Output file path (with .av1.mkv extension).
+        Path: Output file path (with .av1.mkv extension), or None on error.
     """
-    if dest_root is None:
-        return input_path.parent / f"{input_path.stem}.av1.mkv"
-    else:
-        source_path = Path(source_root)
-        dest_path = Path(dest_root)
-        relative_path = input_path.relative_to(source_path)
-        new_filename = f"{input_path.stem}.av1.mkv"
-        output_path = dest_path / relative_path.parent / new_filename
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        return output_path
+    try:
+        if dest_root is None:
+            return input_path.parent / f"{input_path.stem}.av1.mkv"
+        else:
+            source_path = Path(source_root)
+            dest_path = Path(dest_root)
+            relative_path = input_path.relative_to(source_path)
+            new_filename = f"{input_path.stem}.av1.mkv"
+            output_path = dest_path / relative_path.parent / new_filename
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            return output_path
+    except (OSError, PermissionError, ValueError) as e:
+        # ValueError: relative_to lehet hogy hibázik, ha input_path nincs source_path alatt
+        # OSError/PermissionError: mkdir hiba
+        if LOAD_DEBUG:
+            load_debug_log(f"[get_output_filename] Hiba output path generáláskor: {e}")
+        return None
 
 
-def get_copy_filename(input_path, source_root, dest_root):
+def get_copy_filename(input_path: Path, source_root: Optional[Union[str, Path]], dest_root: Optional[Union[str, Path]]) -> Optional[Path]:
     """Generate output path with ORIGINAL extension (for copy fallback).
     
     Used when encoding fails and video must be copied unchanged.
@@ -5030,19 +5056,26 @@ def get_copy_filename(input_path, source_root, dest_root):
         dest_root: Destination root directory (Path or None).
         
     Returns:
-        Path: Output path with original extension.
+        Path: Output path with original extension, or None on error.
     """
-    if dest_root is None:
-        # Same directory: keep original path
-        return input_path
-    else:
-        source_path = Path(source_root)
-        dest_path = Path(dest_root)
-        relative_path = input_path.relative_to(source_path)
-        # Preserve original filename AND extension
-        output_path = dest_path / relative_path
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        return output_path
+    try:
+        if dest_root is None:
+            # Same directory: keep original path
+            return input_path
+        else:
+            source_path = Path(source_root)
+            dest_path = Path(dest_root)
+            relative_path = input_path.relative_to(source_path)
+            # Preserve original filename AND extension
+            output_path = dest_path / relative_path
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            return output_path
+    except (OSError, PermissionError, ValueError) as e:
+        # ValueError: relative_to hiba
+        # OSError/PermissionError: mkdir hiba
+        if LOAD_DEBUG:
+            load_debug_log(f"[get_copy_filename] Hiba copy path generáláskor: {e}")
+        return None
 
 
 def is_misnamed_copy(source_path, dest_av1_path):
@@ -10532,76 +10565,84 @@ class VideoEncoderGUI:
                     except Exception:
                         pass
     
-    def save_settings_to_db(self):
+    def save_settings_to_db(self) -> None:
         """Csak a beállítások mentése az adatbázisba (gyors, nem menti a videó adatokat)"""
         # Lock használata - biztosítja, hogy egyszerre csak egy adatbázis művelet fusson
         with self.db_lock:
-            conn = None
             try:
                 # Retry logika SQLITE_BUSY hibákra
-                max_retries = DB_RETRY_MAX_ATTEMPTS
-                retry_delay = DB_RETRY_DELAY
-                for attempt in range(max_retries):
+                conn = None
+                for attempt in range(DB_RETRY_MAX_ATTEMPTS):
                     try:
                         conn = sqlite3.connect(str(self.db_path), timeout=DB_CONNECTION_TIMEOUT)
                         break  # Sikeres kapcsolat
                     except sqlite3.OperationalError as e:
-                        if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                        if "database is locked" in str(e).lower() and attempt < DB_RETRY_MAX_ATTEMPTS - 1:
                             if LOAD_DEBUG:
-                                load_debug_log(f"[save_settings_to_db] Adatbázis lockolt, újrapróbálás {attempt + 1}/{max_retries}...")
-                            time.sleep(retry_delay * (attempt + 1))  # Exponenciális backoff
+                                load_debug_log(f"[save_settings_to_db] Adatbázis lockolt, újrapróbálás {attempt + 1}/{DB_RETRY_MAX_ATTEMPTS}...")
+                            time.sleep(DB_RETRY_DELAY * (attempt + 1))  # Exponenciális backoff
                             continue
                         else:
                             raise  # Egyéb hiba vagy utolsó próbálkozás
                 
-                cursor = conn.cursor()
-                self._ensure_db_tables(cursor)
+                if conn is None:
+                    raise sqlite3.OperationalError("Nem sikerült kapcsolódni az adatbázishoz")
                 
-                # Settings mentése
-                # FONTOS: source_path és dest_path mindig el legyen mentve, ha be van állítva
-                source_path_str = str(self.source_path) if (hasattr(self, 'source_path') and self.source_path) else None
-                dest_path_str = str(self.dest_path) if (hasattr(self, 'dest_path') and self.dest_path) else None
-                
+                # Context manager használata a connection-höz
+                with conn:
+                    cursor = conn.cursor()
+                    self._ensure_db_tables(cursor)
+                    
+                    # Settings mentése
+                    # FONTOS: source_path és dest_path mindig el legyen mentve, ha be van állítva
+                    source_path_str = str(self.source_path) if (hasattr(self, 'source_path') and self.source_path) else None
+                    dest_path_str = str(self.dest_path) if (hasattr(self, 'dest_path') and self.dest_path) else None
+                    
+                    if LOAD_DEBUG:
+                        load_debug_log(f"[save_settings_to_db] Settings mentése: source_path={source_path_str}, dest_path={dest_path_str}")
+                    
+                    settings_data = {
+                        'source_path': source_path_str,
+                        'dest_path': dest_path_str,
+                        'min_vmaf': float(self.min_vmaf.get()),
+                        'vmaf_step': float(self.vmaf_step.get()),
+                        'max_encoded_percent': int(self.max_encoded_percent.get()),
+                        'resize_enabled': bool(self.resize_enabled.get()),
+                        'resize_height': int(self.resize_height.get()),
+                        'audio_compression_enabled': bool(self.audio_compression_enabled.get()),
+                        'audio_compression_method': str(self.audio_compression_method.get()),
+                        'auto_vmaf_psnr': bool(self.auto_vmaf_psnr.get()),
+                        'svt_preset': int(self.svt_preset.get()),
+                        'nvenc_worker_count': int(self.nvenc_worker_count.get())
+                    }
+                    
+                    # Settings tábla frissítése (INSERT OR REPLACE) - batch optimalizáció
+                    settings_values = [(key, str(value) if value is not None else None) for key, value in settings_data.items()]
+                    cursor.executemany('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', settings_values)
+                    
+                    if LOAD_DEBUG:
+                        load_debug_log(f"[save_settings_to_db] Settings elmentve: {len(settings_values)} beállítás")
+                    
+                    # A context manager automatikusan commit-ol sikeres végrehajtás esetén
+                    
+            except sqlite3.OperationalError as e:
                 if LOAD_DEBUG:
-                    load_debug_log(f"[save_settings_to_db] Settings mentése: source_path={source_path_str}, dest_path={dest_path_str}")
-                
-                settings_data = {
-                    'source_path': source_path_str,
-                    'dest_path': dest_path_str,
-                    'min_vmaf': float(self.min_vmaf.get()),
-                    'vmaf_step': float(self.vmaf_step.get()),
-                    'max_encoded_percent': int(self.max_encoded_percent.get()),
-                    'resize_enabled': bool(self.resize_enabled.get()),
-                    'resize_height': int(self.resize_height.get()),
-                    'audio_compression_enabled': bool(self.audio_compression_enabled.get()),
-                    'audio_compression_method': str(self.audio_compression_method.get()),
-                    'auto_vmaf_psnr': bool(self.auto_vmaf_psnr.get()),
-                    'svt_preset': int(self.svt_preset.get()),
-                    'nvenc_worker_count': int(self.nvenc_worker_count.get())
-                }
-                
-                # Settings tábla frissítése (INSERT OR REPLACE) - batch optimalizáció
-                settings_values = [(key, str(value) if value is not None else None) for key, value in settings_data.items()]
-                cursor.executemany('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', settings_values)
-                
+                    load_debug_log(f"[save_settings_to_db] Adatbázis műveleti hiba: {e}")
+            except (sqlite3.Error, sqlite3.DatabaseError) as e:
                 if LOAD_DEBUG:
-                    load_debug_log(f"[save_settings_to_db] Settings elmentve: {len(settings_values)} beállítás")
-                
-                conn.commit()
-            except (sqlite3.Error, OSError, PermissionError) as e:
-                if conn:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
+                    load_debug_log(f"[save_settings_to_db] SQLite hiba: {e}")
+            except (OSError, IOError) as e:
                 if LOAD_DEBUG:
-                    load_debug_log(f"[save_settings_to_db] Hiba: {e}")
+                    load_debug_log(f"[save_settings_to_db] Fájlrendszer hiba: {e}")
+            except (ValueError, TypeError, AttributeError) as e:
+                if LOAD_DEBUG:
+                    load_debug_log(f"[save_settings_to_db] Érték hiba settings lekérdezéskor: {e}")
+            except Exception as e:
+                if LOAD_DEBUG:
+                    load_debug_log(f"[save_settings_to_db] Váratlan hiba: {e}")
             finally:
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+                # A context manager automatikusan close-olja a connection-t
+                pass
     
     def update_single_video_in_db(self, video_path, item_id, status_text, cq_str, vmaf_str, psnr_str, orig_size_str, new_size_mb, change_percent, completed_date):
         """Egyetlen videó adatbázis-bejegyzésének frissítése (encoding befejezése után)"""
