@@ -724,6 +724,7 @@ import tempfile
 import platform
 import signal
 from pathlib import Path
+from typing import Optional, Dict, List, Tuple, Callable, Any, Union
 import numpy as np
 from PIL import Image
 import tkinter as tk
@@ -817,6 +818,16 @@ MAX_MEAN_BRIGHTNESS = 20  # Fekete frame detektáláshoz
 MIN_STD_DEV = 5.0  # Fekete frame detektáláshoz
 MIN_FILE_SIZE_BYTES = 10000  # Minimum fájlméret validáláshoz
 MIN_FRAME_FILE_SIZE = 1000  # Minimum frame fájl méret (byte)
+
+# Adatbázis konstansok
+DB_CONNECTION_TIMEOUT = 30.0  # másodperc - SQLite kapcsolat timeout
+DB_RETRY_MAX_ATTEMPTS = 3  # Maximum próbálkozások száma SQLITE_BUSY hiba esetén
+DB_RETRY_DELAY = 0.1  # másodperc - Várakozás retry-ok között
+DB_BATCH_SIZE = 1000  # Batch INSERT méret (videók száma)
+DB_SAVE_WAIT_TIMEOUT = 300  # másodperc (5 perc) - Várakozás korábbi DB mentés befejezésére
+
+# Subtitle validálás konstansok
+SUBTITLE_VALIDATION_SAMPLE_BYTES = 2048  # Byte-ok száma felirat előnézet olvasásához
 
 # Nyelvi szótárok
 TRANSLATIONS = {
@@ -1058,7 +1069,7 @@ TRANSLATIONS = {
     }
 }
 
-def get_default_language():
+def get_default_language() -> str:
     """Get the OS default language.
     
     Returns:
@@ -1085,7 +1096,7 @@ def get_default_language():
     except (OSError, AttributeError, ValueError, TypeError):
         return 'en'
 
-def format_localized_number(value, decimals=1, show_sign=False):
+def format_localized_number(value: Optional[Union[int, float, str]], decimals: int = 1, show_sign: bool = False) -> str:
     """Lokalizált szám formázás: magyar = tizedesvessző, angol = tizedespont
     
     Args:
@@ -1418,7 +1429,7 @@ def auto_detect_programs():
         'abav1': find_program_in_path('ab-av1.exe' if sys.platform == 'win32' else 'ab-av1'),
     }
 
-def t(key):
+def t(key: str) -> str:
     """Translation function.
     
     Args:
@@ -10528,11 +10539,11 @@ class VideoEncoderGUI:
             conn = None
             try:
                 # Retry logika SQLITE_BUSY hibákra
-                max_retries = 3
-                retry_delay = 0.1  # 100ms
+                max_retries = DB_RETRY_MAX_ATTEMPTS
+                retry_delay = DB_RETRY_DELAY
                 for attempt in range(max_retries):
                     try:
-                        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+                        conn = sqlite3.connect(str(self.db_path), timeout=DB_CONNECTION_TIMEOUT)
                         break  # Sikeres kapcsolat
                     except sqlite3.OperationalError as e:
                         if "database is locked" in str(e).lower() and attempt < max_retries - 1:
@@ -14635,7 +14646,7 @@ class VideoEncoderGUI:
             with CPU_WORKER_LOCK:
                 # Leállítás ellenőrzés
                 if not self.is_encoding:
-                current_values = self.tree.item(item_id, 'values')
+                    current_values = self.tree.item(item_id, 'values')
                     status = current_values[self.COLUMN_INDEX['status']] if len(current_values) > self.COLUMN_INDEX['status'] else ""
                     tags = self.tree.item(item_id, 'tags')
                     # Kész vagy ellenőrizendő állapotot nem bolygatunk
