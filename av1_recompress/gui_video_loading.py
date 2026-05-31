@@ -118,7 +118,7 @@ class VideoLoadingMixin:
         with self.db_thread_lock:
             has_active_db_threads = any(t.is_alive() for t in self.active_db_threads)
         if has_active_db_threads:
-            self.status_label.config(text='Adatbázis mentés befejezésére várakozás...')
+            self.status_label.config(text=t('status_waiting_db_save'))
             self._refresh_loading_ui()
             wait_start = time.time()
             while True:
@@ -131,7 +131,7 @@ class VideoLoadingMixin:
                 if elapsed > 120.0:
                     # Safety timeout - don't wait forever
                     break
-                self.status_label.config(text=f'Adatbázis mentés befejezésére várakozás... ({elapsed:.0f}s)')
+                self.status_label.config(text=t('status_waiting_db_save_elapsed').format(seconds=f"{elapsed:.0f}"))
                 self._refresh_loading_ui()
                 time.sleep(0.1)
 
@@ -342,9 +342,9 @@ class VideoLoadingMixin:
         
         # Update loading progress - scanning phase
         self.loading_progress['phase'] = 'scanning'
-        self.loading_progress['phase_text'] = 'Mappa keresése...'
+        self.loading_progress['phase_text'] = t('status_scanning_folder')
         self.loading_progress['phase_start_time'] = time.time()
-        self.status_label.config(text='Mappa keresése...')
+        self.status_label.config(text=t('status_scanning_folder'))
         self.root.update_idletasks()  # Non-blocking update
         
         # Progress callback for scanning - uses after() for thread-safe GUI update
@@ -377,8 +377,9 @@ class VideoLoadingMixin:
         while not scan_complete_flag[0]:
             count = last_scan_update[0]
             if count > 0:
-                self.loading_progress['phase_text'] = f'Keresés: {count:,} fájl...'
-                self.status_label.config(text=f'Keresés: {count:,} fájl...')
+                scan_text = t('status_scanning_count').format(count=f"{count:,}")
+                self.loading_progress['phase_text'] = scan_text
+                self.status_label.config(text=scan_text)
             self._refresh_loading_ui()
             time.sleep(0.05)
             if time.time() - scan_wait_start > 300.0:
@@ -404,8 +405,9 @@ class VideoLoadingMixin:
         
         # Update loading progress - filtering phase
         self.loading_progress['phase'] = 'filtering'
-        self.loading_progress['phase_text'] = f'Szűrés: 0/{len(all_files_with_stats):,} fájl...'
-        self.status_label.config(text=f'Szűrés: 0/{len(all_files_with_stats):,} fájl...')
+        filtering_text = t('status_filtering_files').format(processed=f"{0:,}", total=f"{len(all_files_with_stats):,}")
+        self.loading_progress['phase_text'] = filtering_text
+        self.status_label.config(text=filtering_text)
         self.root.update_idletasks()
         
         self.video_files = []
@@ -436,14 +438,24 @@ class VideoLoadingMixin:
             
             # Update GUI every batch_size files or every 200ms
             if processed_filter % batch_size == 0 or (time.time() - last_update) > 0.2:
-                self.loading_progress['phase_text'] = f'Szűrés: {processed_filter:,}/{total_files:,} ({len(self.video_files):,} videó)...'
-                self.status_label.config(text=f'Szűrés: {processed_filter:,}/{total_files:,} ({len(self.video_files):,} videó)...')
+                filtering_text = t('status_filtering_videos').format(
+                    processed=f"{processed_filter:,}",
+                    total=f"{total_files:,}",
+                    videos=f"{len(self.video_files):,}"
+                )
+                self.loading_progress['phase_text'] = filtering_text
+                self.status_label.config(text=filtering_text)
                 self._refresh_loading_ui()
                 last_update = time.time()
 
         # Final progress update to show 100% completion
-        self.loading_progress['phase_text'] = f'Szűrés: {total_files:,}/{total_files:,} ({len(self.video_files):,} videó)...'
-        self.status_label.config(text=f'Szűrés: {total_files:,}/{total_files:,} ({len(self.video_files):,} videó)...')
+        filtering_text = t('status_filtering_videos').format(
+            processed=f"{total_files:,}",
+            total=f"{total_files:,}",
+            videos=f"{len(self.video_files):,}"
+        )
+        self.loading_progress['phase_text'] = filtering_text
+        self.status_label.config(text=filtering_text)
         self.root.update_idletasks()
 
         dir_list_time = (time.time() - dir_list_start) * 1000
@@ -518,8 +530,8 @@ class VideoLoadingMixin:
         
         # Update loading progress - scanning complete
         self.loading_progress['total_files'] = len(self.video_files)
-        self.loading_progress['phase_text'] = f'{len(self.video_files):,} videó találva'
-        self.status_label.config(text=f'{len(self.video_files):,} videó találva - adatbázis ellenőrzése...')
+        self.loading_progress['phase_text'] = t('status_videos_found').format(count=f"{len(self.video_files):,}")
+        self.status_label.config(text=t('status_checking_database').format(count=f"{len(self.video_files):,}"))
         self.root.update_idletasks()  # Non-blocking update
         
         # If skip_av1 is checked, copy .av1 files (if destination folder exists)
@@ -569,8 +581,9 @@ class VideoLoadingMixin:
         # Sort alphabetically by relative path (constant order)
         # Update progress for sorting phase
         self.loading_progress['phase'] = 'sorting'
-        self.loading_progress['phase_text'] = f'{len(self.video_files):,} videó rendezése...'
-        self.status_label.config(text=f'{len(self.video_files):,} videó rendezése...')
+        sorting_text = t('status_sorting_videos').format(count=f"{len(self.video_files):,}")
+        self.loading_progress['phase_text'] = sorting_text
+        self.status_label.config(text=sorting_text)
         self._refresh_loading_ui()
         
         # FAST SORTING: Use string operations instead of slow Path.resolve()
@@ -597,8 +610,8 @@ class VideoLoadingMixin:
         
         # Set order numbers in alphabetical order (constant, does not change)
         # This is fast now - just dict assignment
-        self.loading_progress['phase_text'] = f'Sorszámozás...'
-        self.status_label.config(text=f'Sorszámozás...')
+        self.loading_progress['phase_text'] = t('status_ordering')
+        self.status_label.config(text=t('status_ordering'))
         self._refresh_loading_ui()
         
         self.video_order = {}
@@ -609,8 +622,12 @@ class VideoLoadingMixin:
             self.video_order[video_path] = idx
             # Update GUI every 10000 items or every 200ms
             if idx % 10000 == 0 or (time.time() - last_order_update) > 0.2:
-                self.loading_progress['phase_text'] = f'Sorszámozás: {idx:,}/{total_videos_for_order:,}...'
-                self.status_label.config(text=f'Sorszámozás: {idx:,}/{total_videos_for_order:,}...')
+                ordering_text = t('status_ordering_progress').format(
+                    processed=f"{idx:,}",
+                    total=f"{total_videos_for_order:,}"
+                )
+                self.loading_progress['phase_text'] = ordering_text
+                self.status_label.config(text=ordering_text)
                 self._refresh_loading_ui()
                 last_order_update = time.time()
         
@@ -620,9 +637,9 @@ class VideoLoadingMixin:
         
         # Update loading progress - comparing phase
         self.loading_progress['phase'] = 'comparing'
-        self.loading_progress['phase_text'] = 'Adatbázis összehasonlítása...'
+        self.loading_progress['phase_text'] = t('status_comparing_database')
         self.loading_progress['phase_start_time'] = time.time()
-        self.status_label.config(text=f'{len(self.video_files):,} videó - adatbázis összehasonlítása...')
+        self.status_label.config(text=t('status_comparing_database_count').format(count=f"{len(self.video_files):,}"))
         self.root.update_idletasks()  # Non-blocking update
         
         comparison_start = time.time()
@@ -681,8 +698,12 @@ class VideoLoadingMixin:
             while not db_complete_flag[0]:
                 current_progress = db_progress[0]
                 if current_progress > 0 and (time.time() - last_db_update) > 0.15:
-                    self.loading_progress['phase_text'] = f'Adatbázis: {current_progress:,}/{total_db_videos:,}...'
-                    self.status_label.config(text=f'Adatbázis: {current_progress:,}/{total_db_videos:,}...')
+                    db_progress_text = t('status_database_progress').format(
+                        processed=f"{current_progress:,}",
+                        total=f"{total_db_videos:,}"
+                    )
+                    self.loading_progress['phase_text'] = db_progress_text
+                    self.status_label.config(text=db_progress_text)
                     last_db_update = time.time()
                 self._refresh_loading_ui()
                 time.sleep(0.05)
@@ -952,7 +973,7 @@ class VideoLoadingMixin:
                 else:
                     # Source existence check from directory snapshot (no per-file stat/exists).
                     if not source_scan_info:
-                        result['values'] = ("", "0", result['video_name'], t('status_source_missing'), "-", "-", "-", "-", "-", "-", "-", "-", "-", "")
+                        result['values'] = ("", "0", result['video_name'], t('status_source_missing'), "-", "-", "-", "-", "-", "-", "-", "-", "-", "", "-")
                         result['tag'] = "failed"
                         return result
                     result['exists'] = True
@@ -1592,13 +1613,21 @@ class VideoLoadingMixin:
                             output_cq_crf, output_vmaf, output_psnr, output_frame_count, output_file_size, output_modified_date, output_encoder_type, should_delete_output, output_duration_seconds, output_denoise_info = get_output_file_info(result['output_file'])
                             probe_time = (time.time() - probe_start) * 1000
                             video_loading_log(f"  Output probe took {probe_time:.2f}ms: cq={output_cq_crf}, vmaf={output_vmaf}, size={output_file_size}")
+                            _probe_settings_str = extract_settings_from_file(result['output_file'])
                             manual_info = infer_manual_cq_from_settings(
-                                extract_settings_from_file(result['output_file']),
+                                _probe_settings_str,
                                 output_cq_crf
                             )
                             if manual_info:
                                 saved_video.update(manual_info)
                                 result.update(manual_info)
+                            # Preset comes embedded in the output's Settings metadata
+                            # ("... - Preset N - ..."); cache it so the Preset column can be
+                            # shown and persisted to the DB without re-probing next time.
+                            _probe_preset = parse_preset_from_settings(_probe_settings_str)
+                            if _probe_preset is not None:
+                                saved_video['encoder_preset'] = _probe_preset
+                                result['encoder_preset'] = _probe_preset
                             inferred_denoise_val = normalize_denoise_level(infer_denoise_level_from_filter_info(output_denoise_info))
                             if inferred_denoise_val > 0:
                                 saved_video['denoise_enabled'] = inferred_denoise_val
@@ -1942,7 +1971,8 @@ class VideoLoadingMixin:
                         result['denoise_enabled'] = denoise_val
                         saved_video['denoise_enabled'] = denoise_val
                         result['values'] = (denoise_str, hard_rotate_to_display(result.get('hard_rotate_degrees', 0)), video_name_display, status_text, cq_str, vmaf_str, psnr_str, progress_str,
-                                          orig_size_str, new_size_str, change_percent_display, duration_str, frames_str, completed_date)
+                                          orig_size_str, new_size_str, change_percent_display, duration_str, frames_str, completed_date,
+                                          format_preset_display(saved_video.get('output_encoder_type'), saved_video.get('encoder_preset') or result.get('encoder_preset')))
                         result['tag'] = 'completed'
                         # Store output metadata in result for tree_item_data persistence
                         # This prevents save_state_to_db from losing probed data on warm start
@@ -2030,7 +2060,7 @@ class VideoLoadingMixin:
                         denoise_str = _denoise_level_to_display(denoise_val)
                         result['denoise_enabled'] = denoise_val
                         saved_video['denoise_enabled'] = denoise_val
-                        result['values'] = (denoise_str, hard_rotate_to_display(result.get('hard_rotate_degrees', 0)), video_name_display, status_text, "-", "-", "-", warning_progress, orig_size_str, "-", "-", duration_str, frames_str, completed_date)
+                        result['values'] = (denoise_str, hard_rotate_to_display(result.get('hard_rotate_degrees', 0)), video_name_display, status_text, "-", "-", "-", warning_progress, orig_size_str, "-", "-", duration_str, frames_str, completed_date, "-")
                         result['tag'] = 'pending'
                         # Store output encoder_type for tree_item_data persistence
                         if output_encoder_type:
@@ -2121,12 +2151,16 @@ class VideoLoadingMixin:
                         output_cq_crf, output_vmaf, output_psnr, output_frame_count, output_file_size, output_modified_date, output_encoder_type, should_delete_output, output_duration_seconds, output_denoise_info = get_output_file_info(result['output_file'])
                         probe_time = (time.time() - probe_start) * 1000
                         video_loading_log(f"  Output probe took {probe_time:.2f}ms: cq={output_cq_crf}, vmaf={output_vmaf}, size={output_file_size}")
+                        _probe_settings_str = extract_settings_from_file(result['output_file'])
                         manual_info = infer_manual_cq_from_settings(
-                            extract_settings_from_file(result['output_file']),
+                            _probe_settings_str,
                             output_cq_crf
                         )
                         if manual_info:
                             result.update(manual_info)
+                        _probe_preset = parse_preset_from_settings(_probe_settings_str)
+                        if _probe_preset is not None:
+                            result['encoder_preset'] = _probe_preset
                         inferred_denoise_val = normalize_denoise_level(infer_denoise_level_from_filter_info(output_denoise_info))
                         if inferred_denoise_val > 0:
                             result['denoise_enabled'] = inferred_denoise_val
@@ -2199,7 +2233,7 @@ class VideoLoadingMixin:
                         denoise_val = normalize_denoise_level(result.get('denoise_enabled'))
                         result['denoise_enabled'] = denoise_val
                         denoise_str = _denoise_level_to_display(denoise_val)
-                        result['values'] = (denoise_str, hard_rotate_to_display(result.get('hard_rotate_degrees', 0)), result['video_name'], status_str, cq_str, vmaf_str, psnr_str, progress_str, orig_size_str, new_size_str, change_percent_display, duration_str, frames_str, output_modified_date or "")
+                        result['values'] = (denoise_str, hard_rotate_to_display(result.get('hard_rotate_degrees', 0)), result['video_name'], status_str, cq_str, vmaf_str, psnr_str, progress_str, orig_size_str, new_size_str, change_percent_display, duration_str, frames_str, output_modified_date or "", format_preset_display(output_encoder_type, result.get('encoder_preset')))
                         result['tag'] = "completed_copy" if is_likely_copy_new else "completed"
                         # Store output metadata in result for tree_item_data persistence
                         if output_encoder_type:
@@ -2233,7 +2267,7 @@ class VideoLoadingMixin:
                             saved_video.get('manual_quality_check') if saved_video else None
                         )
                         result['denoise_enabled'] = 0
-                        result['values'] = (_denoise_level_to_display(0), hard_rotate_to_display(result.get('hard_rotate_degrees', 0)), result['video_name'], status_text, "-", "-", "-", "-", orig_size_str, "-", "-", duration_str, frames_str, "")
+                        result['values'] = (_denoise_level_to_display(0), hard_rotate_to_display(result.get('hard_rotate_degrees', 0)), result['video_name'], status_text, "-", "-", "-", "-", orig_size_str, "-", "-", duration_str, frames_str, "", "-")
                         result['tag'] = "pending"
                 
                 # Subtitle files
@@ -2326,7 +2360,7 @@ class VideoLoadingMixin:
                 status_text = f"{t('status_load_error')}: {error_text}" if error_text else t('status_load_error')
                 load_debug_log(f"process_video_data exception: {video_name_display} -> {error_text}")
                 video_loading_log(f"END process_video_data: {video_name_display} - ERROR: {error_text}")
-                result['values'] = ("", "0", video_name_display, status_text, "-", "-", "-", "-", "-", "-", "-", "-", "-", "")
+                result['values'] = ("", "0", video_name_display, status_text, "-", "-", "-", "-", "-", "-", "-", "-", "-", "", "-")
                 result['tag'] = "failed"
             
             return result
@@ -2424,6 +2458,8 @@ class VideoLoadingMixin:
                         original_data['source_fps'] = data['source_fps']
                     if data.get('output_encoder_type'):
                         original_data['output_encoder_type'] = data['output_encoder_type']
+                    if data.get('encoder_preset') not in (None, '', '-'):
+                        original_data['encoder_preset'] = data['encoder_preset']
                     if data.get('output_modified_timestamp') is not None:
                         original_data['output_modified_timestamp'] = data['output_modified_timestamp']
                     if data.get('new_size_bytes') is not None:
@@ -2570,7 +2606,7 @@ class VideoLoadingMixin:
                                             tags = ("subtitle",)
                                         # Gyermek elemként beszúrás - a treeview automatikusan megjeleníti a plusz ikont
                                         # A plusz ikon automatikusan megjelenik, ha van gyermek elem
-                                        sub_item_id = self.tree.insert(item_id, tk.END, text="", values=("", "", lang_display, "", "", "", "", "", "", "", "", "", "", ""), tags=tags)
+                                        sub_item_id = self.tree.insert(item_id, tk.END, text="", values=("", "", lang_display, "", "", "", "", "", "", "", "", "", "", "", ""), tags=tags)
                                         self.subtitle_items[sub_item_id] = (sub_path, lang_part)
                                         if LOAD_DEBUG:
                                             load_debug_log(f"  Added subtitle: {sub_path.name} ({lang_part})")
@@ -2614,21 +2650,32 @@ class VideoLoadingMixin:
                 if self.loading_progress.get('estimated_remaining_seconds', 0) and self.loading_progress['estimated_remaining_seconds'] > 0:
                     eta = int(self.loading_progress['estimated_remaining_seconds'])
                     if eta >= 60:
-                        eta_text = f" (~{eta // 60}:{eta % 60:02d} hátra)"
+                        eta_text = t('status_eta_minutes').format(minutes=eta // 60, seconds=eta % 60)
                     else:
-                        eta_text = f" (~{eta} mp hátra)"
+                        eta_text = t('status_eta_seconds').format(seconds=eta)
                 else:
                     eta_text = ""
                 
-                self.loading_progress['phase_text'] = f"Feldolgozás: {processed_count[0]}/{total_videos} ({percent}%){eta_text}"
-                self.status_label.config(text=f"Feldolgozás: {processed_count[0]}/{total_videos} ({percent}%){eta_text}")
+                processing_text = t('status_processing_load').format(
+                    processed=processed_count[0],
+                    total=total_videos,
+                    percent=percent,
+                    eta=eta_text
+                )
+                self.loading_progress['phase_text'] = processing_text
+                self.status_label.config(text=processing_text)
                 # Do not sort on every incremental update; final sort is done once.
         
         # Start parallel processing - update loading progress
         self.loading_progress['phase'] = 'processing'
-        self.loading_progress['phase_text'] = f"Feldolgozás: 0/{total_videos} (0%)"
+        self.loading_progress['phase_text'] = t('status_processing_load').format(
+            processed=0,
+            total=total_videos,
+            percent=0,
+            eta=""
+        )
         self.loading_progress['phase_start_time'] = time.time()
-        self.status_label.config(text=f"Feldolgozás: 0/{total_videos} (0%)")
+        self.status_label.config(text=self.loading_progress['phase_text'])
         self.root.update_idletasks()  # Non-blocking update
         
         # Thread pool and futures
@@ -2790,7 +2837,7 @@ class VideoLoadingMixin:
                                                         tags = ("subtitle",)
                                                     # Gyermek elemként beszúrás - a treeview automatikusan megjeleníti a plusz ikont
                                                     # A plusz ikon automatikusan megjelenik, ha van gyermek elem
-                                                    sub_item_id = self.tree.insert(item_id, tk.END, text="", values=("", "", lang_display, "", "", "", "", "", "", "", "", "", "", ""), tags=tags)
+                                                    sub_item_id = self.tree.insert(item_id, tk.END, text="", values=("", "", lang_display, "", "", "", "", "", "", "", "", "", "", "", ""), tags=tags)
                                                     self.subtitle_items[sub_item_id] = (sub_path, lang_part)
                                                 # A treeview automatikusan megjeleníti a plusz ikont, ha van gyermek elem
                                                 # Alapértelmezetten bezárt állapotban jelennek meg a gyermek elemek
@@ -2875,16 +2922,22 @@ class VideoLoadingMixin:
                         if total_load_time >= 60:
                             time_text = f"{int(total_load_time // 60)}:{int(total_load_time % 60):02d}"
                         else:
-                            time_text = f"{total_load_time:.1f} mp"
+                            time_text = t('time_seconds_short').format(seconds=total_load_time)
                         
                         # Update loading progress - finished
                         self.loading_progress['phase'] = 'finished'
-                        self.loading_progress['phase_text'] = f"Kész: {len(self.video_files)} videó ({time_text})"
+                        self.loading_progress['phase_text'] = t('status_load_finished_phase').format(
+                            count=len(self.video_files),
+                            time=time_text
+                        )
                         self.loading_progress['percent'] = 100
                         self.loading_progress['processed_files'] = len(self.video_files)
                         self.loading_progress['estimated_remaining_seconds'] = 0
                         
-                        self.status_label.config(text=f"Kész: {len(self.video_files)} videó betöltve ({time_text})")
+                        self.status_label.config(text=t('status_load_finished').format(
+                            count=len(self.video_files),
+                            time=time_text
+                        ))
                         self.is_loading_videos = False
                         
                         # Hide completed items if checkbox is enabled
@@ -3258,11 +3311,10 @@ class VideoLoadingMixin:
         # If we found pending checks, inform user and queue them
         if pending_checks:
             count = len(pending_checks)
-            msg = (f"Újraindítás után {count} videó vár VMAF/PSNR számításra.\n\n"
-                   f"Akarod most elindítani a minőség ellenőrzést?")
+            msg = t('pending_quality_resume_message').format(count=count)
             
             result = messagebox.askyesno(
-                "VMAF/PSNR számítás folytatása",
+                t('pending_quality_resume_title'),
                 msg
             )
             
@@ -3276,7 +3328,7 @@ class VideoLoadingMixin:
                 
                 # Update status
                 self.status_label.config(
-                    text=f"{count} VMAF/PSNR számítás elindítva..."
+                    text=t('pending_quality_started').format(count=count)
                 )
                 
                 if LOG_WRITER:

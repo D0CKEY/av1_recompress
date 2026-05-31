@@ -22,6 +22,7 @@ class TreeSetupMixin:
         'hover_meta_source_section': 'Forrás',
         'hover_meta_output_section': 'Célfájl',
         'hover_meta_output_missing': 'Célfájl metaadat nem érhető el.',
+        'hover_meta_tracks': 'Sávok',
     }
 
     def _tree_hover_text(self, key):
@@ -127,10 +128,14 @@ class TreeSetupMixin:
         tree_frame = ttk.Frame(self.videos_tab, padding="10")
         tree_frame.pack(fill=tk.BOTH, expand=True)
         
-        columns = ("denoise", "hard_rotate", "video_name", "status", "cq", "vmaf", "psnr", "progress", "orig_size", "new_size", "size_change", "duration", "frames", "completed_date")
+        columns = ("denoise", "hard_rotate", "video_name", "status", "cq", "vmaf", "psnr", "progress", "orig_size", "new_size", "size_change", "duration", "frames", "completed_date", "preset")
+        # Display order: 'preset' is shown directly to the right of 'status' instead of last.
+        # Only the rendering order changes here; the logical 'columns' order (and thus COLUMN_INDEX
+        # plus every positional values tuple) stays untouched.
+        display_columns = ("denoise", "hard_rotate", "video_name", "status", "preset", "cq", "vmaf", "psnr", "progress", "orig_size", "new_size", "size_change", "duration", "frames", "completed_date")
         # Column index table - prevents needing to fix in thousand places if modified
         self.COLUMN_INDEX = {col: idx for idx, col in enumerate(columns)}
-        self.tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", height=15, displaycolumns=columns)
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", height=15, displaycolumns=display_columns)
         self._install_tree_text_parser()
         
         self.tree.heading("#0", text=t('column_order'), command=lambda: self.sort_by_column("#0"))
@@ -148,7 +153,8 @@ class TreeSetupMixin:
         self.tree.heading("duration", text=t('column_duration'), command=lambda: self.sort_by_column("duration"))
         self.tree.heading("frames", text=t('column_frames'), command=lambda: self.sort_by_column("frames"))
         self.tree.heading("completed_date", text=t('column_completed'), command=lambda: self.sort_by_column("completed_date"))
-        
+        self.tree.heading("preset", text=t('column_preset'), command=lambda: self.sort_by_column("preset"))
+
         # Set #0 column (tree column) width first - needed for expand/collapse icons
         # A korábbi verzióban 40 volt, de most 50, hogy biztosan látható legyen a plusz ikon
         if '#0' in self.col_widths:
@@ -163,6 +169,8 @@ class TreeSetupMixin:
             if col == "denoise":
                 self.tree.column(col, width=width, anchor=tk.CENTER, stretch=False)
             elif col == "hard_rotate":
+                self.tree.column(col, width=width, anchor=tk.CENTER, stretch=False)
+            elif col == "preset":
                 self.tree.column(col, width=width, anchor=tk.CENTER, stretch=False)
             # Left align for file size columns (better readability for numbers)
             elif col in ("orig_size", "new_size", "size_change", "duration", "frames"):
@@ -179,16 +187,18 @@ class TreeSetupMixin:
         self._init_tree_hover_metadata_support()
         
         scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
+        hscrollbar = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=scrollbar.set, xscrollcommand=hscrollbar.set)
         
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        hscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         self.summary_frame = ttk.Frame(self.videos_tab, padding="10")
         # Hidden by default, only shown if there is a summary
         # self.summary_frame.pack(fill=tk.X)
         
-        self.summary_tree = ttk.Treeview(self.summary_frame, columns=columns, show="tree", height=1, displaycolumns=columns)
+        self.summary_tree = ttk.Treeview(self.summary_frame, columns=columns, show="tree", height=1, displaycolumns=display_columns)
         for col, width in self.col_widths.items():
             try:
                 # Left align for file size columns (better readability for numbers)
@@ -631,54 +641,57 @@ class TreeSetupMixin:
             "",
         ]
 
-        source_header = source_section['section']
-        output_header = output_section['section']
         label_width = max(
             [len(label) for label, _value in source_section['rows']] +
-            [len(label) for label, _value in output_section['rows']] +
-            [len(source_header), len(output_header)]
-        )
+            [len(label) for label, _value in output_section['rows']]
+        ) + 1
         value_width = max(
             [len(str(value)) for _label, value in source_section['rows']] +
             [len(str(value)) for _label, value in output_section['rows']] +
             [len(self._tree_hover_text('hover_meta_unavailable'))]
         )
 
+        def metadata_lines(section):
+            section_lines = [str(section['section'])]
+            for label, value in section['rows']:
+                section_lines.append(f"{label + ':':<{label_width}} {str(value):<{value_width}}".rstrip())
+            return section_lines
+
         source_stream_lines = self._format_hover_stream_section_lines(source_metadata)
         output_stream_lines = self._format_hover_stream_section_lines(output_metadata)
-        source_stream_title = f"{source_section['section']} | Sávok"
-        output_stream_title = f"{output_section['section']} | Sávok"
-        stream_panel_width = max(
-            [len(source_stream_title), len(output_stream_title)] +
-            [len(line) for line in source_stream_lines] +
-            [len(line) for line in output_stream_lines]
-        )
-        block_width = max(
-            label_width + value_width + 2,
-            len(source_header),
-            len(output_header),
-            stream_panel_width
+        tracks_label = self._tree_hover_text('hover_meta_tracks')
+        source_stream_title = f"{source_section['section']} | {tracks_label}"
+        output_stream_title = f"{output_section['section']} | {tracks_label}"
+        source_metadata_lines = metadata_lines(source_section)
+        output_metadata_lines = metadata_lines(output_section)
+        source_panel_lines = source_metadata_lines + [source_stream_title] + source_stream_lines
+        output_panel_lines = output_metadata_lines + [output_stream_title] + output_stream_lines
+        panel_width = max(
+            max(len(line) for line in source_panel_lines),
+            max(len(line) for line in output_panel_lines)
         )
 
-        def append_metadata_block(section):
-            lines.append(str(section['section']))
-            lines.append("-" * block_width)
-            for label, value in section['rows']:
-                cell = f"{label + ':':<{label_width + 1}} {str(value):<{value_width}}"
-                lines.append(f"{cell:<{block_width}}".rstrip())
+        def append_two_column_block(left_lines, right_lines):
+            left_width = panel_width
+            right_width = panel_width
+            separator = "   |   "
+            row_count = max(len(left_lines), len(right_lines))
+            for idx in range(row_count):
+                left = left_lines[idx] if idx < len(left_lines) else ""
+                right = right_lines[idx] if idx < len(right_lines) else ""
+                if idx == 1:
+                    lines.append(f"{'-' * left_width}{separator}{'-' * right_width}")
+                lines.append(f"{left:<{left_width}}{separator}{right:<{right_width}}".rstrip())
 
-        def append_stream_block(title, stream_lines):
-            lines.append("")
-            lines.append(str(title))
-            lines.append("-" * block_width)
-            for stream_line in stream_lines:
-                lines.append(f"{stream_line:<{block_width}}".rstrip())
-
-        append_metadata_block(source_section)
-        append_stream_block(source_stream_title, source_stream_lines)
+        append_two_column_block(
+            source_metadata_lines,
+            output_metadata_lines
+        )
         lines.append("")
-        append_metadata_block(output_section)
-        append_stream_block(output_stream_title, output_stream_lines)
+        append_two_column_block(
+            [source_stream_title] + source_stream_lines,
+            [output_stream_title] + output_stream_lines
+        )
         return "\n".join(lines)
 
     def _show_tree_hover_popup(self, item_id, hover_token):
@@ -837,6 +850,74 @@ class TreeSetupMixin:
             if vid_item_id == item_id:
                 return video_path
         return None
+
+    def _apply_preset_to_row(self, item_id, encoder_type, preset_value, persist=True):
+        """Set the Preset column cell for a row to the actual preset being used.
+
+        Thread-safe: the visible cell is updated via the encoding_queue ("update_partial"),
+        so this may be called from worker threads. When persist=True the value is also stored
+        in the tree-item meta so save_state_to_db writes it to the DB (encoder_preset column).
+        """
+        try:
+            display = format_preset_display(encoder_type, preset_value)
+            try:
+                self.encoding_queue.put(("update_partial", item_id, {'preset': display}))
+            except Exception:
+                pass
+            if persist and preset_value not in (None, '', '-'):
+                try:
+                    self.set_tree_item_meta(item_id, encoder_preset=str(preset_value))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _refresh_planned_preset_cells(self):
+        """GUI thread only: show the live planned preset on rows that are queued/pending.
+
+        SVT-bound rows show the current SVT preset, NVENC-bound rows show 'p7'. Finished rows
+        (they keep their actual preset) and actively-encoding rows (they keep the preset they
+        started with) are left untouched. This lets the user verify that a mid-run preset
+        change will be honoured by encodes that have not started yet.
+        """
+        try:
+            nvenc = bool(self.nvenc_enabled.get())
+        except Exception:
+            nvenc = False
+        planned = 'p7' if nvenc else str(getattr(self, 'current_svt_preset', 2))
+        try:
+            preset_idx = self.COLUMN_INDEX['preset']
+        except (KeyError, AttributeError):
+            return
+        try:
+            items = list(self.video_items.items())
+        except Exception:
+            return
+        for video_path, item_id in items:
+            try:
+                values = self.tree.item(item_id, 'values')
+                status = values[self.COLUMN_INDEX['status']] if len(values) > self.COLUMN_INDEX['status'] else ""
+                tags = self.tree.item(item_id, 'tags') or ()
+            except (tk.TclError, KeyError, AttributeError):
+                continue
+            if is_status_completed(status) or is_status_needs_check(status):
+                continue
+            if 'completed' in tags or 'completed_copy' in tags or 'failed' in tags or 'needs_check' in tags:
+                continue
+            try:
+                if self._is_video_actively_encoding(video_path)[0]:
+                    continue
+            except Exception:
+                pass
+            try:
+                current = list(values)
+                while len(current) <= preset_idx:
+                    current.append("")
+                if current[preset_idx] != planned:
+                    current[preset_idx] = planned
+                    self.tree.item(item_id, values=tuple(current))
+            except (tk.TclError, KeyError, AttributeError):
+                continue
 
     def _show_hidden_item_if_needed(self, item_id):
         """Reattaches a previously hidden item when its status is no longer completed."""
@@ -1165,7 +1246,7 @@ class TreeSetupMixin:
             new_size_str = format_size_auto(total_new_size_bytes)
             change_percent_str = f"{format_localized_number(change_percent, decimals=2, show_sign=True)}%"
             self.summary_tree.insert("", tk.END, text="Σ",
-                values=("", "", f"━━━━ SUMMARY ({encoded_count} videos) ━━━━", "", "", "", "", "", orig_size_str, new_size_str, change_percent_str, "", "", ""), tags=("summary",))
+                values=("", "", f"━━━━ SUMMARY ({encoded_count} videos) ━━━━", "", "", "", "", "", orig_size_str, new_size_str, change_percent_str, "", "", "", ""), tags=("summary",))
         else:
             # Hide summary row if no completed videos
             self.summary_frame.pack_forget()

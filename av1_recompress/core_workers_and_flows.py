@@ -123,7 +123,7 @@ def run_crf_search(input_path, encoder='av1_nvenc', initial_min_vmaf=None, vmaf_
     if progress_callback:
         encoder_label = "NVENC" if encoder == 'av1_nvenc' else "SVT-AV1"
         min_vmaf_str = format_localized_number(min_vmaf, decimals=2)
-        progress_callback(f"{encoder_label} CRF keresés (VMAF: {min_vmaf_str})")
+        progress_callback(t('status_crf_search_vmaf').format(encoder=encoder_label, vmaf=min_vmaf_str))
     
     while min_vmaf >= min_vmaf_threshold:
         if stop_event.is_set():
@@ -295,7 +295,7 @@ def run_crf_search(input_path, encoder='av1_nvenc', initial_min_vmaf=None, vmaf_
                 min_vmaf -= vmaf_step
                 if progress_callback:
                     encoder_label = "NVENC" if encoder == 'av1_nvenc' else "SVT-AV1"
-                    progress_callback(f"{encoder_label} CRF keresés (VMAF fallback: {format_localized_number(min_vmaf, decimals=2)})")
+                    progress_callback(t('status_crf_search_vmaf_fallback').format(encoder=encoder_label, vmaf=format_localized_number(min_vmaf, decimals=2)))
                 continue
             
             if process.returncode == 0:
@@ -380,7 +380,7 @@ def run_crf_search(input_path, encoder='av1_nvenc', initial_min_vmaf=None, vmaf_
                         min_vmaf -= vmaf_step
                         if progress_callback:
                             encoder_label = "NVENC" if encoder == 'av1_nvenc' else "SVT-AV1"
-                            progress_callback(f"{encoder_label} CRF search (VMAF fallback: {format_localized_number(min_vmaf, decimals=2)})")
+                            progress_callback(t('status_crf_search_vmaf_fallback').format(encoder=encoder_label, vmaf=format_localized_number(min_vmaf, decimals=2)))
                         continue
             else:
                 current_vmaf_str = format_localized_number(min_vmaf, decimals=2)
@@ -389,7 +389,7 @@ def run_crf_search(input_path, encoder='av1_nvenc', initial_min_vmaf=None, vmaf_
                 min_vmaf -= vmaf_step
                 if progress_callback:
                     encoder_label = "NVENC" if encoder == 'av1_nvenc' else "SVT-AV1"
-                    progress_callback(f"{encoder_label} CRF keresés (VMAF fallback: {format_localized_number(min_vmaf, decimals=2)})")
+                    progress_callback(t('status_crf_search_vmaf_fallback').format(encoder=encoder_label, vmaf=format_localized_number(min_vmaf, decimals=2)))
                 continue
         except FileNotFoundError as e:
             # WinError 2 or FileNotFoundError - ab-av1.exe not found
@@ -1082,6 +1082,27 @@ def encode_single_attempt(input_path, output_path, cq_value, subtitle_files, enc
     except Exception:
         pass
 
+    # Denoised masters can have a container duration that is a few seconds longer
+    # than the actual packet/frame count. SVT can then encode the real last frame
+    # and keep waiting forever for EOF. For video-only denoise re-encodes, stop
+    # exactly at the real frame count so FFmpeg writes the trailer and exits.
+    forced_video_frame_count = None
+    if encoder == 'svt-av1' and denoise_enabled and not include_audio:
+        try:
+            from .core_audio_video_ops import get_frame_count
+            forced_video_frame_count = get_frame_count(Path(input_str))
+            if forced_video_frame_count and forced_video_frame_count > 0:
+                ffmpeg_cmd.extend(['-frames:v', str(int(forced_video_frame_count))])
+                total_frames = int(forced_video_frame_count)
+                if video_fps > 0:
+                    duration_seconds = total_frames / video_fps
+                    duration_hours = int(duration_seconds // 3600)
+                    duration_mins = int((duration_seconds % 3600) // 60)
+                    duration_secs = int(duration_seconds % 60)
+                print(f"[INFO] Denoised master frame limit enabled: -frames:v {forced_video_frame_count}")
+        except Exception as frame_limit_error:
+            print(f"[WARN] Denoised master frame limit unavailable: {frame_limit_error}")
+
     ffmpeg_cmd.extend(['-y', output_str])
     
     # Write FFmpeg command to console
@@ -1109,7 +1130,7 @@ def encode_single_attempt(input_path, output_path, cq_value, subtitle_files, enc
     try:
         # IMPORTANT: We do NOT set cwd because there might be identical filenames in different folders
         # Using absolute paths ensures we use the correct files
-        with subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, encoding='utf-8', errors='replace', bufsize=1, shell=False, startupinfo=get_startup_info()) as process:
+        with subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, encoding='utf-8', errors='replace', bufsize=1, shell=False, startupinfo=get_startup_info()) as process:
             
             # Process registration
             with ACTIVE_PROCESSES_LOCK:
@@ -1117,9 +1138,109 @@ def encode_single_attempt(input_path, output_path, cq_value, subtitle_files, enc
 
             # Initialize size estimation tracking
             last_size_update = 0.0 if size_estimation_callback else None
+            import time as time_module
+            import threading as threading_module
+            last_progress_signature = None
+            last_real_progress_at = time_module.monotonic()
+            stall_size_watchdog_started = False
+            stall_force_killed = threading_module.Event()
+            stall_near_end_timeout = 120.0 if encoder == 'svt-av1' else 300.0
+            stall_general_timeout = 600.0 if encoder == 'svt-av1' else 900.0
+
+            def get_output_file_size():
+                try:
+                    return output_resolved.stat().st_size
+                except (OSError, FileNotFoundError):
+                    return None
+
+            def force_kill_stalled_process():
+                stall_force_killed.set()
+                try:
+                    process.kill()
+                    process.wait(timeout=10)
+                    return
+                except Exception:
+                    pass
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                    return
+                except Exception:
+                    pass
+                if os.name == 'nt':
+                    try:
+                        subprocess.run(
+                            ['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                            startupinfo=get_startup_info()
+                        )
+                    except Exception:
+                        pass
+
+            def start_stall_size_watchdog(current_frame=None, progress_ratio=0.0):
+                nonlocal stall_size_watchdog_started
+                if stall_size_watchdog_started:
+                    return
+                stall_size_watchdog_started = True
+
+                def watchdog():
+                    stable_window_seconds = 15 * 60
+                    check_interval_seconds = 30
+                    last_size = get_output_file_size()
+                    last_size_change_at = time_module.monotonic()
+                    last_notice_at = last_size_change_at
+                    print(
+                        f"[WARN] FFmpeg/SVT progress appears stalled "
+                        f"(frame={current_frame}, progress={progress_ratio:.2%}). "
+                        "Monitoring real output file size for 15 minutes before force kill."
+                    )
+
+                    while process.poll() is None and not stop_event.is_set():
+                        time_module.sleep(check_interval_seconds)
+                        now = time_module.monotonic()
+                        current_size = get_output_file_size()
+
+                        if current_size != last_size:
+                            old_size = last_size
+                            last_size = current_size
+                            last_size_change_at = now
+                            last_notice_at = now
+                            if current_size is not None:
+                                print(
+                                    f"[INFO] Output file size changed during stall watch: "
+                                    f"{old_size if old_size is not None else 'missing'} -> {current_size} bytes. "
+                                    "15-minute no-growth window reset."
+                                )
+                            continue
+
+                        unchanged_for = now - last_size_change_at
+                        if now - last_notice_at >= 300:
+                            print(
+                                f"[WARN] Output file size unchanged for {int(unchanged_for)}s "
+                                f"(size={current_size if current_size is not None else 'missing'}). "
+                                "Force kill threshold: 900s."
+                            )
+                            last_notice_at = now
+
+                        if unchanged_for >= stable_window_seconds:
+                            print(
+                                "[ERROR] Output file size did not change for 15 minutes after "
+                                "FFmpeg/SVT progress stalled; force killing process."
+                            )
+                            force_kill_stalled_process()
+                            return
+
+                threading_module.Thread(
+                    target=watchdog,
+                    name=f"ffmpeg-size-stall-watch-{process.pid}",
+                    daemon=True
+                ).start()
 
             try:
                 for line in process.stdout:
+                    now_monotonic = time_module.monotonic()
                     if stop_event.is_set():
                         process.kill()
                         process.wait()
@@ -1135,9 +1256,50 @@ def encode_single_attempt(input_path, output_path, cq_value, subtitle_files, enc
                                 sys.stdout.flush()
                     except (OSError, IOError, AttributeError):
                         pass
+                    stripped_line = line.strip()
+                    if stripped_line.startswith('frame='):
+                        try:
+                            frame_match_stall = re.search(r'frame=\s*(\d+)', stripped_line)
+                            time_match_stall = re.search(r'time=\s*(\d{2}):(\d{2}):(\d{2})(?:\.(\d{2}))?', stripped_line)
+                            size_match_stall = re.search(r'size=\s*(\d+(?:\.\d+)?)(KiB|MiB|GiB)', stripped_line)
+                            current_frame_stall = int(frame_match_stall.group(1)) if frame_match_stall else None
+                            current_seconds_stall = None
+                            if time_match_stall:
+                                h_stall = int(time_match_stall.group(1))
+                                m_stall = int(time_match_stall.group(2))
+                                s_stall = int(time_match_stall.group(3))
+                                cs_stall = int(time_match_stall.group(4)) if time_match_stall.group(4) else 0
+                                current_seconds_stall = h_stall * 3600 + m_stall * 60 + s_stall + cs_stall / 100.0
+                            current_size_kib = None
+                            if size_match_stall:
+                                size_value = float(size_match_stall.group(1))
+                                size_unit = size_match_stall.group(2)
+                                if size_unit == 'KiB':
+                                    current_size_kib = int(size_value)
+                                elif size_unit == 'MiB':
+                                    current_size_kib = int(size_value * 1024)
+                                elif size_unit == 'GiB':
+                                    current_size_kib = int(size_value * 1024 * 1024)
+                            progress_signature = (current_frame_stall, current_seconds_stall, current_size_kib)
+
+                            if progress_signature != last_progress_signature:
+                                last_progress_signature = progress_signature
+                                last_real_progress_at = now_monotonic
+                            else:
+                                frame_ratio = (current_frame_stall / total_frames) if current_frame_stall and total_frames > 0 else 0.0
+                                time_ratio = (current_seconds_stall / duration_seconds) if current_seconds_stall and duration_seconds > 0 else 0.0
+                                progress_ratio = max(frame_ratio, time_ratio)
+                                stall_timeout = stall_near_end_timeout if progress_ratio >= 0.995 else stall_general_timeout
+                                if not stall_size_watchdog_started and now_monotonic - last_real_progress_at >= stall_timeout:
+                                    start_stall_size_watchdog(
+                                        current_frame=current_frame_stall,
+                                        progress_ratio=progress_ratio
+                                    )
+                        except (ValueError, TypeError, AttributeError, OSError):
+                            pass
                     if status_callback:
                         # Only process frame= lines for progress calculation (ignore warning messages)
-                        if line.strip().startswith('frame='):
+                        if stripped_line.startswith('frame='):
                             # Extract frame number
                             frame_match = re.search(r'frame=\s*(\d+)', line)
                             if frame_match and total_frames > 0:
@@ -1174,8 +1336,7 @@ def encode_single_attempt(input_path, output_path, cq_value, subtitle_files, enc
                                     status_callback(f"{progress_hours:02d}:{progress_mins:02d}:{progress_secs:02d} / {duration_hours:02d}:{duration_mins:02d}:{duration_secs:02d}")
 
                     # Size estimation callback (every 30 seconds)
-                    if size_estimation_callback and line.strip().startswith('frame='):
-                        import time as time_module
+                    if size_estimation_callback and stripped_line.startswith('frame='):
                         current_time_val = time_module.time()
                         if last_size_update is not None and (current_time_val - last_size_update >= 30):
                             # Parse size=XXXKiB or size=XXXMiB
@@ -1225,7 +1386,9 @@ def encode_single_attempt(input_path, output_path, cq_value, subtitle_files, enc
         if stop_event.is_set():
             raise EncodingStopped()
 
-        success = process.returncode == 0
+        success = process.returncode == 0 and not stall_force_killed.is_set()
+        if stall_force_killed.is_set():
+            print("[ERROR] FFmpeg/SVT was force killed after stall; output MKV is not trusted.")
         
         debug_pause(
             f"FFmpeg finished: {'OK' if success else 'ERROR'} (CQ: {int(cq_value)})",

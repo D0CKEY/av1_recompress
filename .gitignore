@@ -1,0 +1,61 @@
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Build outputs and packaged binaries
+build/
+dist/
+*.spec
+*.exe
+*.dll
+*.pyd
+*.pyz
+build_*.bat
+build_*.py
+compile.bat
+av1_rebuild.py
+
+# Runtime state, logs, and local databases
+*.log
+*.log.*
+*.db
+*.sqlite
+*.sqlite3
+history.txt
+
+# Local editor and assistant state
+.vscode/
+.idea/
+.agent/
+.claude/
+.kilo/
+.cursorrules
+*.code-workspace
+
+# Backups and generated local copies
+backup/
+*_backup/
+AV1_recompress_backup/
+
+# Local media/sample files
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+*.m4v
+*.ts
+*.m2ts
+*.flv
+*.wmv
+*.y4m
+
+# Bundled external tools kept locally
+ffmpeg.exe
+ffprobe.exe
+ab-av1.exe
+mkvmerge.exe

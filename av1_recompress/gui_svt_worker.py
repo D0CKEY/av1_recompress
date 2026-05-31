@@ -505,8 +505,21 @@ class SvtWorkerMixin:
             # THREAD-SAFETY FIX: Read svt_preset and crf_increment from task dict
             # (pre-cached on GUI thread in add_to_svt_queue) instead of calling
             # self.svt_preset.get() / self.crf_increment.get() from this worker thread.
-            svt_preset = task.get('svt_preset', 2)
+            #
+            # PRESET LIVE-UPDATE: the preset is a global encoder setting, not per-task.
+            # Prefer the live GUI-thread cache (self.current_svt_preset, a plain int kept
+            # in sync by update_svt_preset_label) so a mid-run preset change is honoured by
+            # encodes that START after the change. Fall back to the task's frozen value,
+            # then to 2. Already-running encodes are unaffected (preset is read once here,
+            # at task start).
+            live_preset = getattr(self, 'current_svt_preset', None)
+            svt_preset = live_preset if isinstance(live_preset, int) and live_preset > 0 else task.get('svt_preset', 2)
             crf_increment = task.get('crf_increment', 1)
+
+            # Show the actual preset used for this encode in the tree's Preset column and
+            # persist it (so it survives restart without re-probing the output file).
+            if hasattr(self, '_apply_preset_to_row'):
+                self._apply_preset_to_row(item_id, 'svt-av1', svt_preset)
 
             # CRITICAL FIX: Use current resize settings if not explicitly set in task
             # This allows users to change resize settings while encoding is running
@@ -672,7 +685,7 @@ class SvtWorkerMixin:
                 localized_vmaf = format_localized_number(initial_min_vmaf, decimals=2)
                 
                 # Use worker index prefix
-                self.encoding_queue.put_nowait(("update", item_id, f"SVT-AV1 #{worker_index + 1} CRF keresés (VMAF: {localized_vmaf})...", "-", "-", "-", "-", orig_size_str, "-", "-", completed_date))
+                self.encoding_queue.put_nowait(("update", item_id, t('status_crf_search_vmaf').format(encoder=f"SVT-AV1 #{worker_index + 1}", vmaf=localized_vmaf), "-", "-", "-", "-", orig_size_str, "-", "-", completed_date))
                 
                 # Kezdési időpont tárolása
                 self.encoding_start_times[item_id] = time.time()
@@ -1169,7 +1182,7 @@ class SvtWorkerMixin:
                                         else:
                                             effective_max_encoded = max_encoded
                                         
-                                        mode_label = "Videósáv" if max_encoded_mode == 'video' else "Teljes videó"
+                                        mode_label = t('max_encoded_mode_video') if max_encoded_mode == 'video' else t('max_encoded_mode_full')
                                         with console_redirect(svt_logger):
                                             print(f"⚖ Zajszűrés méret korrekció ({mode_label} mód):")
                                             print(f"   Eredeti forrásfájl: {orig_size/(1024**2):.1f} MB")
@@ -1261,7 +1274,7 @@ class SvtWorkerMixin:
                         
                         if is_reencode:
                             # Újrakódolás: ha bármilyen hiba van (NoSuitableCRFFound vagy más), másoljuk át a fájlt
-                            reencode_type = "Manuális" if task.get('reason', '').startswith('manual_reencode') else "Automata"
+                            reencode_type = (t('task_type_manual') if task.get('reason', '').startswith('manual_reencode') else t('task_type_auto')).capitalize()
                             error_type = "nem talált megfelelő értéket" if is_no_suitable_crf else f"hiba történt: {str(e)}"
                             
                             with console_redirect(svt_logger):
@@ -1641,7 +1654,7 @@ class SvtWorkerMixin:
                         try:
                             if not is_app_closing() and self.root.winfo_exists():
                                 self.root.after(0, lambda: messagebox.showerror(
-                                    "VÉGZETES HIBA",
+                                    t('fatal_error_title'),
                                     error_msg
                                 ))
                         except tk.TclError:
@@ -2353,7 +2366,7 @@ class SvtWorkerMixin:
                     is_reencode = task.get('reason', '').startswith('manual_reencode') or task.get('reason', '').startswith('auto_reencode')
                     if is_reencode:
                         # Újrakódolás: kódolás sikertelen - hiba
-                        reencode_type = "Manuális" if task.get('reason', '').startswith('manual_reencode') else "Automata"
+                        reencode_type = (t('task_type_manual') if task.get('reason', '').startswith('manual_reencode') else t('task_type_auto')).capitalize()
                         with console_redirect(svt_logger):
                             print(f"\n[ERROR] SVT-AV1 kódolás sikertelen: {video_path.name}")
                             print(f"   -> {reencode_type} újrakódolás sikertelen\n")
@@ -2590,16 +2603,15 @@ class SvtWorkerMixin:
             if is_encoding:
                 active_override_requested = True
                 # Megerősítés kérése a felhasználótól
-                task_type_str = "automata" if not task_info.get('is_manual') else "manuális"
+                task_type_str = t('task_type_auto') if not task_info.get('is_manual') else t('task_type_manual')
                 
-                confirm_msg = (
-                    f"Ez a videó jelenleg {task_type_str} átkódolás alatt van:\n\n"
-                    f"Videó: {video_path.name}\n"
-                    f"Queue: {queue_type.upper()}\n\n"
-                    f"A folyamatban lévő átkódolást le szeretnéd állítani és "
-                    f"újrakezdeni SVT-AV1 encoderrel*\n\n"
-                    f"Ez felülírja a meglévő fájlt!\n\n"
-                    f"Megjegyzés: A zajszűrt mesterfájl (ha van) megmarad és újrafelhasználódik."
+                confirm_msg = t('msg_active_reencode_svt_confirm').format(
+                    task_type=task_type_str,
+                    video_label=t('label_video'),
+                    filename=video_path.name,
+                    queue=queue_type.upper(),
+                    overwrite_note=t('msg_overwrite_existing_file'),
+                    keep_master_note=t('msg_keep_denoised_master_note')
                 )
                 
                 result = messagebox.askyesno(
@@ -2622,7 +2634,7 @@ class SvtWorkerMixin:
                     self.manual_override_ready_events.pop(video_path, None)
                     messagebox.showerror(
                         t('msg_error'),
-                        f"Nem sikerült leállítani a folyamatban lévő átkódolást:\n{video_path.name}"
+                        t('msg_stop_active_encoding_failed').format(filename=video_path.name)
                     )
                     return False
 
@@ -2630,7 +2642,7 @@ class SvtWorkerMixin:
                     self.manual_override_ready_events.pop(video_path, None)
                     messagebox.showerror(
                         t('msg_error'),
-                        f"Nem sikerült leállítani a folyamatban lévő átkódolást:\n{video_path.name}"
+                        t('msg_stop_active_encoding_failed').format(filename=video_path.name)
                     )
                     return False
             else:
@@ -2641,7 +2653,7 @@ class SvtWorkerMixin:
                 
                 result = messagebox.askyesno(
                     t('menu_reencode_svt'),
-                    f"{t('msg_svt_reencode_confirm')}\n\n{video_path.name}\n\nEz felülírja a meglévő fájlt!"
+                    f"{t('msg_svt_reencode_confirm')}\n\n{video_path.name}\n\n{t('msg_overwrite_existing_file')}"
                 )
                 if not result:
                     return False
@@ -2792,19 +2804,19 @@ class SvtWorkerMixin:
         if is_encoding:
             active_override_requested = True
             # Megerősítés kérése a felhasználótól
-            task_type_str = "automata" if not task_info.get('is_manual') else "manuális"
+            task_type_str = t('task_type_auto') if not task_info.get('is_manual') else t('task_type_manual')
             encoder_display = "NVENC" if encoder_type == "NVENC" else "SVT-AV1"
             
-            confirm_msg = (
-                f"Ez a videó jelenleg {task_type_str} átkódolás alatt van:\n\n"
-                f"Videó: {video_path.name}\n"
-                f"Queue: {queue_type.upper()}\n\n"
-                f"A folyamatban lévő átkódolást le szeretnéd állítani és "
-                f"újrakezdeni a következő beállításokkal*\n\n"
-                f"Encoder: {encoder_display}\n"
-                f"CQ/CRF: {target_cq}\n\n"
-                f"Ez felülírja a meglévő fájlt!\n\n"
-                f"Megjegyzés: A zajszűrt mesterfájl (ha van) megmarad és újrafelhasználódik."
+            confirm_msg = t('msg_active_reencode_config_confirm').format(
+                task_type=task_type_str,
+                video_label=t('label_video'),
+                filename=video_path.name,
+                queue=queue_type.upper(),
+                encoder_label=t('label_encoder'),
+                encoder=encoder_display,
+                cq=target_cq,
+                overwrite_note=t('msg_overwrite_existing_file'),
+                keep_master_note=t('msg_keep_denoised_master_note')
             )
             
             result = messagebox.askyesno(
@@ -2827,7 +2839,7 @@ class SvtWorkerMixin:
                 self.manual_override_ready_events.pop(video_path, None)
                 messagebox.showerror(
                     t('msg_error'),
-                    f"Nem sikerült leállítani a folyamatban lévő átkódolást:\n{video_path.name}"
+                    t('msg_stop_active_encoding_failed').format(filename=video_path.name)
                 )
                 return
 
@@ -2835,7 +2847,7 @@ class SvtWorkerMixin:
                 self.manual_override_ready_events.pop(video_path, None)
                 messagebox.showerror(
                     t('msg_error'),
-                    f"Nem sikerült leállítani a folyamatban lévő átkódolást:\n{video_path.name}"
+                    t('msg_stop_active_encoding_failed').format(filename=video_path.name)
                 )
                 return
         else:
@@ -2844,10 +2856,10 @@ class SvtWorkerMixin:
             result = messagebox.askyesno(
                 t('menu_reencode'),
                 f"{t('msg_reencode_confirm')}\n\n"
-                f"Videó: {video_path.name}\n"
-                f"Encoder: {encoder_display}\n"
+                f"{t('label_video')}: {video_path.name}\n"
+                f"{t('label_encoder')}: {encoder_display}\n"
                 f"CQ/CRF: {target_cq}\n\n"
-                f"Ez felülírja a meglévő fájlt!"
+                f"{t('msg_overwrite_existing_file')}"
             )
             
             if not result:
@@ -3031,7 +3043,7 @@ class SvtWorkerMixin:
 
             # Megerősítés kérése a felhasználótól (csak ha nem bulk művelet)
             if not skip_confirmation:
-                task_type_str = "automata" if not task_info.get('is_manual') else "manuális"
+                task_type_str = t('task_type_auto') if not task_info.get('is_manual') else t('task_type_manual')
                 encoder_display = encoder_type  # Már "NVENC" vagy "SVT-AV1"
                 quality_check_display = {
                     'vmaf': t('manual_quality_vmaf'),
@@ -3040,16 +3052,18 @@ class SvtWorkerMixin:
                     'none': t('manual_quality_none')
                 }.get(quality_check, quality_check)
 
-                confirm_msg = (
-                    f"Ez a videó jelenleg {task_type_str} átkódolás alatt van:\n\n"
-                    f"Videó: {video_path.name}\n"
-                    f"Queue: {queue_type.upper()}\n\n"
-                    f"A folyamatban lévő átkódolást le szeretnéd állítani és "
-                    f"újrakezdeni a következő manuális beállításokkal?\n\n"
-                    f"Encoder: {encoder_display}\n"
-                    f"CQ/CRF: {target_cq} ({cq_range})\n"
-                    f"Minőség ellenőrzés: {quality_check_display}\n\n"
-                    f"Megjegyzés: A zajszűrt mesterfájl (ha van) megmarad és újrafelhasználódik."
+                confirm_msg = t('msg_active_reencode_manual_confirm').format(
+                    task_type=task_type_str,
+                    video_label=t('label_video'),
+                    filename=video_path.name,
+                    queue=queue_type.upper(),
+                    encoder_label=t('label_encoder'),
+                    encoder=encoder_display,
+                    cq=target_cq,
+                    cq_range=cq_range,
+                    quality_label=t('label_quality_check'),
+                    quality_check=quality_check_display,
+                    keep_master_note=t('msg_keep_denoised_master_note')
                 )
 
                 result = messagebox.askyesno(
@@ -3073,7 +3087,7 @@ class SvtWorkerMixin:
                 if not skip_confirmation:
                     messagebox.showerror(
                         t('msg_error'),
-                        f"Nem sikerült leállítani a folyamatban lévő átkódolást:\n{video_path.name}"
+                        t('msg_stop_active_encoding_failed').format(filename=video_path.name)
                     )
                 return
 
@@ -3082,7 +3096,7 @@ class SvtWorkerMixin:
                 if not skip_confirmation:
                     messagebox.showerror(
                         t('msg_error'),
-                        f"Nem sikerült leállítani a folyamatban lévő átkódolást:\n{video_path.name}"
+                        t('msg_stop_active_encoding_failed').format(filename=video_path.name)
                     )
                 return
         else:
@@ -3099,11 +3113,11 @@ class SvtWorkerMixin:
                 result = messagebox.askyesno(
                     t('menu_reencode_manual'),
                     f"{t('msg_reencode_confirm')}\n\n"
-                    f"Videó: {video_path.name}\n"
-                    f"Encoder: {encoder_display}\n"
+                    f"{t('label_video')}: {video_path.name}\n"
+                    f"{t('label_encoder')}: {encoder_display}\n"
                     f"CQ/CRF: {target_cq} ({cq_range})\n"
-                    f"Minőség ellenőrzés: {quality_check_display}\n\n"
-                    f"Ez felülírja a meglévő fájlt!"
+                    f"{t('label_quality_check')}: {quality_check_display}\n\n"
+                    f"{t('msg_overwrite_existing_file')}"
                 )
 
                 if not result:

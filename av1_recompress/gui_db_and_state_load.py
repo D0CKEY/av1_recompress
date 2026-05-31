@@ -396,7 +396,8 @@ class DBAndStateLoadMixin:
                 cached_data.get('size_change_display', cached_data.get('size_change', '-')),
                 cached_data.get('duration_display', cached_data.get('duration', '-')),
                 cached_data.get('frames_display', cached_data.get('frames', '-')),
-                cached_data.get('completed_date', '')
+                cached_data.get('completed_date', ''),
+                format_preset_display(cached_data.get('output_encoder_type'), cached_data.get('encoder_preset'))
             ]
             return values
         except Exception:
@@ -445,7 +446,8 @@ class DBAndStateLoadMixin:
                 manual_cq_range TEXT,
                 manual_cq_value INTEGER,
                 manual_quality_check TEXT,
-                hard_rotate_degrees INTEGER DEFAULT 0
+                hard_rotate_degrees INTEGER DEFAULT 0,
+                encoder_preset TEXT
             )
             ''')
         except sqlite3.Error as e:
@@ -516,6 +518,14 @@ class DBAndStateLoadMixin:
                 raise
         try:
             cursor.execute('ALTER TABLE videos ADD COLUMN output_extra_metadata TEXT')
+        except sqlite3.OperationalError as alter_error:
+            if 'duplicate column name' not in str(alter_error).lower():
+                raise
+        # Migration: add encoder_preset if missing (old DBs) — stores the SVT-AV1/NVENC
+        # preset actually used for the output, so the tree's Preset column can be shown
+        # without re-probing the file on every load.
+        try:
+            cursor.execute('ALTER TABLE videos ADD COLUMN encoder_preset TEXT')
         except sqlite3.OperationalError as alter_error:
             if 'duplicate column name' not in str(alter_error).lower():
                 raise
@@ -877,7 +887,8 @@ class DBAndStateLoadMixin:
                     'source_duration_seconds, source_fps, orig_size_bytes, source_modified_timestamp, '
                     'output_file_size_bytes, output_encoder_type, new_size_bytes, output_frame_count, '
                     'output_duration_seconds, output_fps, source_extra_metadata, output_extra_metadata, '
-                    'denoise_enabled, manual_cq_range, manual_cq_value, manual_quality_check, hard_rotate_degrees FROM videos'
+                    'denoise_enabled, manual_cq_range, manual_cq_value, manual_quality_check, hard_rotate_degrees, '
+                    'encoder_preset FROM videos'
                 )
                 existing_data = {}
                 for row in cursor.fetchall():
@@ -902,7 +913,8 @@ class DBAndStateLoadMixin:
                         'manual_cq_range': row[18] if len(row) > 18 else None,
                         'manual_cq_value': row[19] if len(row) > 19 else None,
                         'manual_quality_check': row[20] if len(row) > 20 else None,
-                        'hard_rotate_degrees': row[21] if len(row) > 21 else 0
+                        'hard_rotate_degrees': row[21] if len(row) > 21 else 0,
+                        'encoder_preset': row[22] if len(row) > 22 else None
                     }
 
                 try:
@@ -980,8 +992,8 @@ class DBAndStateLoadMixin:
                             source_modified_timestamp, output_modified_timestamp, output_file_size_bytes, output_encoder_type,
                             source_extra_metadata, output_extra_metadata,
                             denoise_enabled, manual_cq_range, manual_cq_value, manual_quality_check, hard_rotate_degrees,
-                            output_track_editor_cache
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            output_track_editor_cache, encoder_preset
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', videos_data)
 
                     if LOAD_DEBUG:
@@ -1104,6 +1116,8 @@ class DBAndStateLoadMixin:
                     output_encoder_type = _infer_output_encoder_type(status_code, status_text)
 
                 denoise_enabled = normalize_denoise_level(meta.get('denoise_enabled', existing.get('denoise_enabled', 0)))
+                encoder_preset = meta.get('encoder_preset', existing.get('encoder_preset'))
+                encoder_preset = str(encoder_preset) if encoder_preset not in (None, '', '-') else None
                 hard_rotate_degrees = normalize_hard_rotate_degrees(meta.get('hard_rotate_degrees', existing.get('hard_rotate_degrees', 0)))
                 manual_cq_range = meta.get('manual_cq_range', existing.get('manual_cq_range'))
                 manual_cq_value = meta.get('manual_cq_value', existing.get('manual_cq_value'))
@@ -1169,7 +1183,8 @@ class DBAndStateLoadMixin:
                     manual_cq_value,
                     manual_quality_check,
                     hard_rotate_degrees,
-                    existing_track_editor_cache.get(str(video_path))
+                    existing_track_editor_cache.get(str(video_path)),
+                    encoder_preset
                 ))
             except Exception as e:
                 if LOG_WRITER:
@@ -1873,7 +1888,8 @@ class DBAndStateLoadMixin:
                            output_frame_count, output_duration_seconds, output_fps,
                            source_modified_timestamp, output_modified_timestamp, output_file_size_bytes, output_encoder_type,
                            source_extra_metadata, output_extra_metadata,
-                           denoise_enabled, manual_cq_range, manual_cq_value, manual_quality_check, hard_rotate_degrees
+                           denoise_enabled, manual_cq_range, manual_cq_value, manual_quality_check, hard_rotate_degrees,
+                           encoder_preset
                     FROM videos
                 ''')
                 videos_rows = cursor.fetchall()
@@ -1914,7 +1930,8 @@ class DBAndStateLoadMixin:
                         'manual_cq_range': row[29] if len(row) > 29 else None,
                         'manual_cq_value': row[30] if len(row) > 30 else None,
                         'manual_quality_check': row[31] if len(row) > 31 else None,
-                        'hard_rotate_degrees': row[32] if len(row) > 32 else 0
+                        'hard_rotate_degrees': row[32] if len(row) > 32 else 0,
+                        'encoder_preset': row[33] if len(row) > 33 else None
                     }
                     videos_list.append(video_dict)
                 
@@ -1975,7 +1992,7 @@ class DBAndStateLoadMixin:
     def show_db_notification(self):
         """Show database save notification for 3 seconds."""
         if hasattr(self, 'db_notification_label'):
-            self.db_notification_label.config(text="[OK] Database saved", foreground="green")
+            self.db_notification_label.config(text=t('db_notification_saved'), foreground="green")
             # Hide after 3 seconds
             self.root.after(3000, self.hide_db_notification)
 
@@ -1996,7 +2013,7 @@ class DBAndStateLoadMixin:
         # Set new timer
         def show_notification():
             if hasattr(self, 'db_notification_label'):
-                self.db_notification_label.config(text="[OK] Database updated", foreground="green")
+                self.db_notification_label.config(text=t('db_notification_updated'), foreground="green")
                 # Hide after 3 seconds
                 self.root.after(3000, self.hide_db_notification)
             self.db_update_notification_timer = None

@@ -154,7 +154,7 @@ from .core_audio_video_ops import (
     apply_faststart, get_audio_streams_total_size_mb, create_denoised_lossless_master,
     get_hybrid_paths, create_smdegrain_master, cleanup_smdegrain_files,
     extract_audio_tracks_with_metadata, merge_video_audio_subtitles, cleanup_extracted_audio_files,
-    extract_settings_from_file
+    extract_settings_from_file, parse_preset_from_settings, format_preset_display
 )
 
 # Import metrics and validation functions

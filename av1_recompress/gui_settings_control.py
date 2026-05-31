@@ -6,31 +6,13 @@ class SettingsControlMixin:
     
     This mixin consolidates all label update methods that control encoding settings
     to provide a consistent interface and avoid duplication across multiple mixins.
-    
-    Methods in this mixin should be placed AFTER worker mixins in the MRO to ensure
-    they take precedence when resolving method names.
+
+    NOTE: the shared confirmation dialog `_confirm_setting_change_during_encoding`
+    is defined once in VmafWorkerMixin, which precedes this mixin in the
+    VideoEncoderGUI base list (Python MRO resolves left-to-right, so the leftmost
+    base wins). Do NOT redefine it here: a duplicate would be silently shadowed.
     """
-    
-    def _confirm_setting_change_during_encoding(self, setting_var, new_value, old_value):
-        """Show confirmation dialog when changing settings during encoding.
-        
-        Args:
-            setting_var: The tkinter variable being changed
-            new_value: The new value being set
-            old_value: The current/old value
-            
-        Returns:
-            bool: True if user accepted the change, False if cancelled
-        """
-        if not getattr(self, 'is_encoding', False):
-            return True
-        
-        result = messagebox.askyesno(
-            t('msg_warning'),
-            t('msg_setting_change_while_encoding').format(old=old_value, new=new_value)
-        )
-        return result
-    
+
     def update_max_encoded_label(self, value):
         """Update max encoded size percentage label with confirmation dialog.
         
@@ -125,7 +107,14 @@ class SettingsControlMixin:
         """
         int_value = int(float(value))
         self.svt_preset.set(int_value)
+        # Keep the thread-safe live cache in sync so a mid-run preset change is
+        # honoured by encodes that start after the change (read in the SVT worker).
+        self.current_svt_preset = int_value
         self.svt_preset_value_label.config(text=str(int_value))
+        # Reflect the new planned preset on queued/pending rows so the user can verify
+        # the change will take effect for encodes that have not started yet.
+        if hasattr(self, '_refresh_planned_preset_cells'):
+            self._refresh_planned_preset_cells()
         self._save_settings_debounced()  # Automatikus mentés debounce-szal
     
     def update_nvenc_workers_label(self, value):

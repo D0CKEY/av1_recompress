@@ -14,7 +14,7 @@ try:
 except ImportError:
     # Fallback if imports fail
     def is_status_completed(status):
-        return status and ('[OK]' in str(status) or 'Kész' in str(status) or 'Done' in str(status))
+        return status and ('[OK]' in str(status) or 'Done' in str(status) or 'Completed' in str(status))
     def parse_size_to_bytes(size_str):
         return None
     def format_size_auto(size_bytes):
@@ -201,24 +201,19 @@ class HttpServerMixin:
 
             # Show success message in GUI
             self.root.after(100, lambda: messagebox.showinfo(
-                "HTTP Szerver",
-                f"HTTP szerver elindult!\n\n"
-                f"Helyi elérés: http://127.0.0.1:{port}\n"
-                f"Hálózati elérés: http://<IP>:{port}\n\n"
-                f"Nyisd meg a böngészőben!"
+                t('http_server_title'),
+                t('http_server_started_message').format(port=port)
             ))
 
             self.werkzeug_server.serve_forever()
         except Exception as e:
             print(f"Failed to start Flask HTTP server: {e}")
             self.http_server_running = False
+            error_text = str(e)
             # Show error message in GUI
             self.root.after(0, lambda: messagebox.showerror(
-                "HTTP Szerver Hiba",
-                f"Nem sikerült elindítani a HTTP szervert!\n\n"
-                f"Hiba: {e}\n\n"
-                f"Port: {port}\n"
-                f"Próbálj meg másik portot (pl. 8080, 8000)!"
+                t('http_server_error_title'),
+                t('http_server_start_error_message').format(error=error_text, port=port)
             ))
     
     def stop_http_server(self):
@@ -363,35 +358,27 @@ class HttpServerMixin:
 
                     # Show success message in GUI
                     gui_instance.root.after(100, lambda: messagebox.showinfo(
-                        "HTTP Szerver (Fallback)",
-                        f"HTTP szerver elindult!\n"
-                        f"(Flask nem elérhető, fallback mód)\n\n"
-                        f"Helyi elérés: http://127.0.0.1:{port}\n"
-                        f"Hálózati elérés: http://{local_ip}:{port}\n\n"
-                        f"Nyisd meg a böngészőben!"
+                        t('http_server_fallback_title'),
+                        t('http_server_started_fallback_message').format(port=port, local_ip=local_ip)
                     ))
                 except Exception:
                     print('[HTTP] FALLBACK HTTP SERVER STARTED')
 
                     # Show simple success message
                     gui_instance.root.after(100, lambda: messagebox.showinfo(
-                        "HTTP Szerver",
-                        f"HTTP szerver elindult!\n\n"
-                        f"Helyi elérés: http://127.0.0.1:{port}\n\n"
-                        f"Nyisd meg a böngészőben!"
+                        t('http_server_title'),
+                        t('http_server_started_simple_message').format(port=port)
                     ))
 
                 server.serve_forever()
             except Exception as e:
                 print(f"Failed to start HTTP server: {e}")
                 gui_instance.http_server_running = False
+                error_text = str(e)
                 # Show error message in GUI
                 gui_instance.root.after(0, lambda: messagebox.showerror(
-                    "HTTP Szerver Hiba",
-                    f"Nem sikerült elindítani a HTTP szervert!\n\n"
-                    f"Hiba: {e}\n\n"
-                    f"Port: {port}\n"
-                    f"Próbálj meg másik portot (pl. 8080, 8000)!"
+                    t('http_server_error_title'),
+                    t('http_server_start_error_message').format(error=error_text, port=port)
                 ))
 
         self.http_thread = threading.Thread(target=run_server, daemon=True)

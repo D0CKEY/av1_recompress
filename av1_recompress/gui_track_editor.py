@@ -168,7 +168,7 @@ class LanguageInputDialog(tk.Toplevel):
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(side=tk.BOTTOM, pady=(20, 0))
 
-        ttk.Button(button_frame, text="OK", command=self._on_ok, width=10).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(button_frame, text=t('dialog_ok'), command=self._on_ok, width=10).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(button_frame, text=t('track_editor_btn_cancel'), command=self._on_cancel, width=10).pack(side=tk.LEFT)
 
         # Bind Enter key to OK
@@ -500,7 +500,7 @@ class TrackEditorDialog(tk.Toplevel):
             self.rotation_combo.pack(side=tk.LEFT)
             self.rotation_combo.current(0)  # Always start at "Unchanged"
         else:
-            ttk.Label(video_frame, text="No video stream found").pack(side=tk.LEFT)
+            ttk.Label(video_frame, text=t('track_editor_no_video_stream')).pack(side=tk.LEFT)
             self.video_offset_var = tk.StringVar(value="0")
             self.original_video_offset_ms = 0
             self.rotation_combo = None
@@ -534,7 +534,7 @@ class TrackEditorDialog(tk.Toplevel):
         ttk.Button(audio_btn_frame, text="▲", width=4, command=lambda: self._move_item(self.audio_tree, -1)).pack(pady=2)
         ttk.Button(audio_btn_frame, text="▼", width=4, command=lambda: self._move_item(self.audio_tree, 1)).pack(pady=2)
         ttk.Separator(audio_btn_frame, orient='horizontal').pack(fill='x', pady=5)
-        ttk.Button(audio_btn_frame, text="Default", command=lambda: self._set_default(self.audio_tree, 'audio')).pack(pady=2)
+        ttk.Button(audio_btn_frame, text=t('track_editor_btn_default'), command=lambda: self._set_default(self.audio_tree, 'audio')).pack(pady=2)
         ttk.Separator(audio_btn_frame, orient='horizontal').pack(fill='x', pady=5)
         ttk.Button(audio_btn_frame, text=t('track_editor_btn_remove'), command=lambda: self._remove_track(self.audio_tree)).pack(pady=2)
         
@@ -566,8 +566,8 @@ class TrackEditorDialog(tk.Toplevel):
         ttk.Button(sub_btn_frame, text=t('track_editor_btn_load_external'),
                    command=self._load_external_subtitle).pack(pady=2, fill='x')
         ttk.Separator(sub_btn_frame, orient='horizontal').pack(fill='x', pady=5)
-        ttk.Button(sub_btn_frame, text="Default", command=lambda: self._set_default(self.subtitle_tree, 'subtitle')).pack(pady=2)
-        ttk.Button(sub_btn_frame, text="Forced", command=lambda: self._toggle_forced(self.subtitle_tree)).pack(pady=2)
+        ttk.Button(sub_btn_frame, text=t('track_editor_btn_default'), command=lambda: self._set_default(self.subtitle_tree, 'subtitle')).pack(pady=2)
+        ttk.Button(sub_btn_frame, text=t('track_editor_btn_forced'), command=lambda: self._toggle_forced(self.subtitle_tree)).pack(pady=2)
         ttk.Separator(sub_btn_frame, orient='horizontal').pack(fill='x', pady=5)
         ttk.Button(sub_btn_frame, text=t('track_editor_btn_remove'), command=lambda: self._remove_track(self.subtitle_tree)).pack(pady=2)
 
@@ -1218,7 +1218,7 @@ class TrackEditorDialog(tk.Toplevel):
             try:
                 new_offset = int(offset_var.get())
             except ValueError:
-                messagebox.showerror(t('track_editor_error'), "Invalid offset value", parent=dialog)
+                messagebox.showerror(t('track_editor_error'), t('track_editor_invalid_offset_value'), parent=dialog)
                 return
 
             # Update user_offsets
@@ -1243,7 +1243,7 @@ class TrackEditorDialog(tk.Toplevel):
         # Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(side=tk.BOTTOM, pady=(10, 0))
-        ttk.Button(btn_frame, text="OK", command=on_ok, width=10).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(btn_frame, text=t('dialog_ok'), command=on_ok, width=10).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(btn_frame, text=t('track_editor_btn_cancel'), command=on_cancel, width=10).pack(side=tk.LEFT)
 
         # Bind Enter key

@@ -68,10 +68,18 @@ class LanguageAndLabelsMixin:
             if hasattr(self, 'denoised_master_8bit_checkbutton'):
                 self.denoised_master_8bit_checkbutton.config(text=t('denoised_master_8bit_test'))
             self.skip_av1_checkbutton.config(text=t('skip_av1'))
+            if hasattr(self, 'svt_preset_label'):
+                self.svt_preset_label.config(text=t('svt_preset'), width=20, anchor=tk.W)
             if hasattr(self, 'nvenc_workers_label'):
-                self.nvenc_workers_label.config(text=t('nvenc_workers'), width=20, anchor=tk.W)
+                self.nvenc_workers_label.config(text=t('nvenc_workers_short'), width=8, anchor=tk.W)
+            if hasattr(self, 'svt_workers_label'):
+                self.svt_workers_label.config(text=t('svt_workers_short'), width=5, anchor=tk.W)
             if hasattr(self, 'crf_increment_label'):
                 self.crf_increment_label.config(text=t('crf_increment'), width=20, anchor=tk.W)
+            if hasattr(self, 'max_cq_label'):
+                self.max_cq_label.config(text=t('max_cq_limit'), width=14, anchor=tk.W)
+            if hasattr(self, 'max_cq_hint_label'):
+                self.max_cq_hint_label.config(text=t('max_cq_auto_hint'))
             
             # Update slider VALUE labels (decimal separator: HU = comma, EN = point)
             if hasattr(self, 'vmaf_value_label') and hasattr(self, 'min_vmaf'):
@@ -149,7 +157,8 @@ class LanguageAndLabelsMixin:
             self.tree.heading("duration", text=t('column_duration'))
             self.tree.heading("frames", text=t('column_frames'))
             self.tree.heading("completed_date", text=t('column_completed'))
-            
+            self.tree.heading("preset", text=t('column_preset'))
+
             # Update bottom buttons
             self.start_button.config(text=t('btn_start'))
             self.immediate_stop_button.config(text=t('btn_immediate_stop'))
@@ -166,21 +175,17 @@ class LanguageAndLabelsMixin:
                     current_status = current_values[self.COLUMN_INDEX['status']]
                     # Handle CRF search statuses with VMAF value
                     import re
-                    crf_match = re.search(r'(NVENC|SVT-AV1)\s+CRF\s+(?:keresés|search)\s*\(VMAF(?:\s+fallback)?:\s*([\d.]+)\)', current_status)
+                    crf_match = re.search(r'(NVENC|SVT-AV1(?:\s+#\d+)?)\s+CRF\s+.*?\(VMAF(?:\s+fallback)?:\s*([\d.,]+)\)', current_status)
                     if crf_match:
                         encoder = crf_match.group(1)
                         vmaf_value = crf_match.group(2)
                         is_fallback = 'fallback' in crf_match.group(0)
-                        if encoder == 'NVENC':
-                            base_status = t('status_nvenc_crf_search')
-                        else:
-                            base_status = t('status_svt_crf_search')
-                        # Remove "..." suffix if present
-                        base_status = base_status.rstrip('...')
+                        encoder_label = 'NVENC' if encoder == 'NVENC' else encoder
                         if is_fallback:
-                            new_status = f"{base_status} (VMAF fallback: {vmaf_value})..."
+                            base_status = t('status_crf_search_vmaf_fallback').format(encoder=encoder_label, vmaf=vmaf_value)
                         else:
-                            new_status = f"{base_status} (VMAF: {vmaf_value})..."
+                            base_status = t('status_crf_search_vmaf').format(encoder=encoder_label, vmaf=vmaf_value)
+                        new_status = base_status
                         current_values[self.COLUMN_INDEX['status']] = new_status
                         self.tree.item(item_id, values=tuple(current_values))
                         continue

@@ -1,0 +1,9 @@
+# AV1 Batch Encoder - Required Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core dependencies (required)
+Pillow>=9.0.0           # Image processing for frame validation
+psutil>=5.9.0           # Process management (recursive child process termination)
+
+# Optional dependencies (for enhanced features)
+flask>=2.0.0            # Web interface (optional, app works without it)

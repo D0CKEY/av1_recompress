@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Optional, Callable, Any, Dict, Tuple, TYPE_CHECKING
 
+from .i18n import TRANSLATIONS, t
+
 if TYPE_CHECKING:
     from queue import Queue
 
@@ -308,7 +310,7 @@ def calculate_effective_max_encoded(
                 effective_max_encoded = round(effective_max_encoded, 2)
                 effective_max_encoded = max(0.01, effective_max_encoded)
 
-                mode_label = "Videósáv" if max_encoded_mode == 'video' else "Teljes videó"
+                mode_label = t('max_encoded_mode_video') if max_encoded_mode == 'video' else t('max_encoded_mode_full')
                 log_print(f"⚖ Zajszűrés méret korrekció ({mode_label} mód):")
                 log_print(f"   Eredeti forrásfájl: {orig_size/(1024**2):.1f} MB")
                 log_print(f"   Eredeti videó (becsült): {original_video_size/(1024**2):.1f} MB")
@@ -722,7 +724,7 @@ def handle_reencode_copy_fallback(
     )
 
     reason = task.get('reason', '')
-    reencode_type = "Manuális" if reason.startswith('manual_reencode') else "Automata"
+    reencode_type = (t('task_type_manual') if reason.startswith('manual_reencode') else t('task_type_auto')).capitalize()
     error_type = "nem talált megfelelő értéket" if is_no_suitable_crf else f"hiba történt: {str(error)}"
 
     if logger and console_redirect:
@@ -856,26 +858,10 @@ def handle_ab_av1_not_found(
     import time as time_module
     import tkinter as tk
 
-    if lang == 'hu':
-        error_msg = (
-            f"VÉGZETES HIBA: Az ab-av1.exe nem található vagy nem indítható!\n\n"
-            f"Hiba: {error}\n\n"
-            f"A program nem tudja elindítani az ab-av1.exe-t, ezért a CRF keresés nem lehetséges.\n\n"
-            f"Ellenőrizd, hogy az ab-av1.exe létezik-e a megadott útvonalon, "
-            f"vagy állítsd be a helyes útvonalat a beállításokban."
-        )
-        title = "VÉGZETES HIBA"
-        status_text = "[ERROR] Ab-av1.exe nem található"
-    else:
-        error_msg = (
-            f"FATAL ERROR: ab-av1.exe not found or cannot be started!\n\n"
-            f"Error: {error}\n\n"
-            f"The program cannot start ab-av1.exe, so CRF search is not possible.\n\n"
-            f"Check if ab-av1.exe exists at the specified path, "
-            f"or set the correct path in settings."
-        )
-        title = "FATAL ERROR"
-        status_text = "[ERROR] Ab-av1.exe not found"
+    lang_texts = TRANSLATIONS.get(lang) or TRANSLATIONS.get('en', {})
+    error_msg = lang_texts.get('msg_abav1_fatal_error', 'FATAL ERROR: ab-av1.exe not found: {error}').format(error=error)
+    title = lang_texts.get('fatal_error_title', 'Fatal Error')
+    status_text = lang_texts.get('status_abav1_not_found', '[ERROR] Ab-av1.exe not found')
 
     if logger and console_redirect:
         with console_redirect(logger):

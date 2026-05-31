@@ -146,11 +146,7 @@ class EncodingControlMixin:
             missing_tools.append("VirtualDub2")
 
         if missing_tools:
-            msg = (
-                "Hiányzó vagy hibás eszközútvonal(ak): "
-                + ", ".join(missing_tools)
-                + ".\nEllenőrizd a beállításokat, majd indítsd újra."
-            )
+            msg = t('msg_missing_tool_paths').format(tools=", ".join(missing_tools))
             try:
                 messagebox.showerror(t('msg_error'), msg)
             except Exception:
@@ -194,7 +190,10 @@ class EncodingControlMixin:
             self.clear_all_svt_tasks()
     
         self._refresh_encoding_worker_snapshot()
-    
+        # Show the planned preset on queued/pending rows right away at Start.
+        if hasattr(self, '_refresh_planned_preset_cells'):
+            self._refresh_planned_preset_cells()
+
         DEBUG_MODE.set(self.debug_mode.get())
         
         # SVT-AV1 queue-ban lévő videók betöltése a list-alapú SVT queue-ba
@@ -751,7 +750,7 @@ class EncodingControlMixin:
         if self.is_queue_loading:
             # Queue feltöltés leállítása (a háttérszál ellenőrzi ezt a flag-et)
             self.queue_loading_stop_requested = True
-            self.status_label.config(text="Queue feltöltés leállítása...")
+            self.status_label.config(text=t('status_queue_loading_stop_requested'))
             if LOG_WRITER:
                 try:
                     LOG_WRITER.write("Queue loading stop requested\n")
@@ -1493,7 +1492,7 @@ class EncodingControlMixin:
             except Exception:
                 pass
 
-        self.status_label.config(text="Graceful stop timeout → azonnali leállítás...")
+        self.status_label.config(text=t('status_graceful_timeout_immediate'))
 
         # Direct immediate stop without confirmation dialog
         self._stop_encoding_immediate_internal(skip_confirm=True)
@@ -1582,6 +1581,7 @@ class EncodingControlMixin:
         """Capture worker runtime settings on the GUI thread."""
         self.current_min_vmaf = float(self.min_vmaf.get())
         self.current_vmaf_step = float(self.vmaf_step.get())
+        self.current_svt_preset = int(self.svt_preset.get()) if hasattr(self, 'svt_preset') else 2
         self.current_max_encoded_percent = float(self.max_encoded_percent.get())
         self.current_resize_enabled = bool(self.resize_enabled.get())
         self.current_resize_height = self.resize_height.get()
@@ -2009,7 +2009,7 @@ class EncodingControlMixin:
     
             # Ha a betöltött státusz már SVT-AV1 queue-ban vár, akkor automatikusan SVT queue-ba helyezzük
             # Ne próbáljuk újra NVENC-cel
-            if "SVT-AV1" in current_status and ("queue-ban vár" in current_status or "várakozás" in current_status.lower() or "vár" in current_status.lower()):
+            if normalize_status_to_code(current_status) == 'svt_queue':
                 with console_redirect(self.svt_logger):
                     print(f"\n[WARN] Videó már SVT-AV1 queue-ban van (betöltött státusz) -> SVT queue-ba újrahelyezés: {video_path.name}")
                 
@@ -2085,7 +2085,7 @@ class EncodingControlMixin:
             # Kezdeti státusz a cél VMAF értékkel
             completed_date = current_values[self.COLUMN_INDEX['completed_date']] if len(current_values) > self.COLUMN_INDEX['completed_date'] else ""
             localized_vmaf = format_localized_number(initial_min_vmaf, decimals=2)
-            self.encoding_queue.put(("update", item_id, f"NVENC CRF keresés (VMAF: {localized_vmaf})...", "-", "-", "-", "-", orig_size_str, "-", "-", completed_date))
+            self.encoding_queue.put(("update", item_id, t('status_crf_search_vmaf').format(encoder='NVENC', vmaf=localized_vmaf), "-", "-", "-", "-", orig_size_str, "-", "-", completed_date))
             
             # Kezdési időpont tárolása
             self.encoding_start_times[item_id] = time.time()

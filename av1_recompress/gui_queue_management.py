@@ -250,6 +250,7 @@ class QueueManagementMixin:
                 # Először gyors ellenőrzések (tree.item hívások)
                 current_values, current_tags = self._get_tree_data_snapshot(item_id)
                 current_status = current_values[self.COLUMN_INDEX['status']] if len(current_values) > self.COLUMN_INDEX['status'] else ""
+                status_code = normalize_status_to_code(current_status)
                 
                 # Kész vagy ellenőrizendő állapotot kihagyjuk (gyors ellenőrzés)
                 if is_status_completed(current_status) or "completed" in current_tags or is_status_needs_check(current_status) or "needs_check" in current_tags:
@@ -257,12 +258,10 @@ class QueueManagementMixin:
                 
                 # Folyamatban lévő kódolásokat kihagyjuk (gyors ellenőrzés)
                 if ("encoding" in current_tags or "encoding_nvenc" in current_tags or "encoding_svt" in current_tags or 
-                    "NVENC kódolás" in current_status or "NVENC CRF keresés" in current_status or 
-                    "NVENC validálás" in current_status or "SVT-AV1" in current_status):
+                    status_code in ('nvenc_encoding', 'nvenc_crf_search', 'nvenc_validation', 'svt_encoding', 'svt_crf_search')):
                     continue
                 
                 # Csak azokat vesszük figyelembe, amelyek NVENC queue-ban várnak (nem SVT-AV1)
-                status_code = normalize_status_to_code(current_status)
                 if status_code != 'nvenc_queue' and not ('pending' in current_tags and status_code != 'svt_queue'):
                     continue  # Gyors skip, ha nem NVENC queue
                 
@@ -363,7 +362,7 @@ class QueueManagementMixin:
                         with self.encoding_state_lock:
                             self.is_encoding = False
                             self.encoding_worker_running = False
-                        self.status_label.config(text="Nincs feldolgozható várólista feladat.")
+                        self.status_label.config(text=t('status_queue_no_processable_tasks'))
                         if LOG_WRITER:
                             try:
                                 LOG_WRITER.write(
@@ -434,7 +433,7 @@ class QueueManagementMixin:
                     if total_queued > 0:
                         # Van már betöltött feladat - workerek már futnak
                         self.status_label.config(
-                            text=f"Queue feltöltés leállítva ({total_queued:,} feladat betöltve)"
+                            text=t('status_queue_loading_stopped_with_count').format(count=f"{total_queued:,}")
                         )
                         # Gomb átváltás normál stop-ra
                         self.start_button.config(text=t('btn_stop'), command=self.stop_encoding_graceful, state=tk.NORMAL)
@@ -460,7 +459,7 @@ class QueueManagementMixin:
                         with self.encoding_state_lock:
                             self.is_encoding = False
                             self.encoding_worker_running = False
-                        self.status_label.config(text="Queue feltöltés leállítva")
+                        self.status_label.config(text=t('status_queue_loading_stopped'))
                     continue
 
                 if msg[0] == "nvenc_log":
@@ -588,9 +587,10 @@ class QueueManagementMixin:
                             duration = current_values[self.COLUMN_INDEX['duration']] if len(current_values) > self.COLUMN_INDEX['duration'] else "-"
                             frames = current_values[self.COLUMN_INDEX['frames']] if len(current_values) > self.COLUMN_INDEX['frames'] else "-"
                             completed_date = current_values[self.COLUMN_INDEX['completed_date']] if len(current_values) > self.COLUMN_INDEX['completed_date'] else ""
-                            
+                            preset_cell = current_values[self.COLUMN_INDEX['preset']] if len(current_values) > self.COLUMN_INDEX['preset'] else ""
+
                             # Frissítjük a sort
-                            self.tree.item(item_id, values=(denoise, hard_rotate_str, video_name, target_status, "-", "-", "-", "-", orig_size_str, "-", "-", duration, frames, completed_date), tags=("pending",))
+                            self.tree.item(item_id, values=(denoise, hard_rotate_str, video_name, target_status, "-", "-", "-", "-", orig_size_str, "-", "-", duration, frames, completed_date, preset_cell), tags=("pending",))
                     except Exception as e:
                         print(t('log_status_revert_error').format(error=e))
                     continue
@@ -785,7 +785,15 @@ class QueueManagementMixin:
                                             except (ValueError, TypeError, ZeroDivisionError):
                                                 pass
 
-                        self.tree.item(item_id, values=(denoise_str, hard_rotate_str, video_name, status, cq, vmaf, psnr, progress, orig_size, new_size, change, duration_str, frames_str, completed_date))
+                        # Preserve the Preset column (positional update message does not carry it).
+                        existing_preset_cell = ""
+                        try:
+                            _existing_vals = self.tree.item(item_id, 'values')
+                            if len(_existing_vals) > self.COLUMN_INDEX['preset']:
+                                existing_preset_cell = _existing_vals[self.COLUMN_INDEX['preset']]
+                        except (tk.TclError, KeyError, AttributeError):
+                            pass
+                        self.tree.item(item_id, values=(denoise_str, hard_rotate_str, video_name, status, cq, vmaf, psnr, progress, orig_size, new_size, change, duration_str, frames_str, completed_date, existing_preset_cell))
 
                         self.set_tree_item_meta(
                             item_id,
@@ -1000,7 +1008,12 @@ class QueueManagementMixin:
                                 except (OSError, IOError, AttributeError, ValueError):
                                     # Log writer closed/unavailable - non-critical
                                     pass
-                            if is_status_completed(status) and item_id not in self.hidden_items:
+                            # ROOT-CAUSE FIX: only detach when the "hide completed" filter is
+                            # actually enabled. Previously this branch detached unconditionally and
+                            # relied on a later toggle_hide_completed() to reattach it ~150ms later;
+                            # if that reattach lost a race the row stayed stuck in hidden_items and
+                            # vanished from the table until the user manually toggled the filter.
+                            if self.hide_completed.get() and is_status_completed(status) and item_id not in self.hidden_items:
                                 try:
                                     parent = self.tree.parent(item_id)
                                     if parent == "" and item_id in self.tree.get_children():

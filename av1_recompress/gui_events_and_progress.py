@@ -138,9 +138,14 @@ class EventsAndProgressMixin:
                                         col_name = "#0"
                                     else:
                                         col_idx = int(col_token[1:]) - 1
-                                        cols = list(widget["columns"]) if "columns" in widget.keys() else []
-                                        if 0 <= col_idx < len(cols):
-                                            col_name = str(cols[col_idx])
+                                        # identify_column returns the index in DISPLAY order, so resolve
+                                        # the name via displaycolumns (falling back to columns when it is
+                                        # unset or the special "#all" sentinel).
+                                        disp = list(widget["displaycolumns"]) if "displaycolumns" in widget.keys() else []
+                                        if not disp or disp == ["#all"]:
+                                            disp = list(widget["columns"]) if "columns" in widget.keys() else []
+                                        if 0 <= col_idx < len(disp):
+                                            col_name = str(disp[col_idx])
                                 details.append(f"tree_col={col_name}")
                             except Exception:
                                 pass

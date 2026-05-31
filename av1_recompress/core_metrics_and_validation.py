@@ -26,6 +26,11 @@ from .core_paths_tools_logging import (
     EncodingStopped,
     get_startup_info
 )
+# NOTE: during `core` assembly this fragment is concatenated BEFORE
+# core_audio_video_ops, so the submodule alias does not yet exist in sys.modules
+# and Python loads core_audio_video_ops.py once from disk here. This is a harmless
+# one-time startup double-load: both functions are used only inside functions
+# (resolved at call time), never at module load.
 from .core_audio_video_ops import get_video_info, get_video_resolution
 
 LIBVMAF_SUPPORTS_PSNR = True

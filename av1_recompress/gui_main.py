@@ -36,6 +36,70 @@ class VideoEncoderGUI(AppStateAndPathsMixin, DBAndStateLoadMixin, TreeSetupMixin
 
         return getattr(self.root, attr)
 
+    def _configure_safe_startup_geometry(self):
+        """Place the main window fully on the primary screen at startup."""
+        default_width = 1600
+        default_height = 900
+        min_width = 1400
+        min_height = 700
+
+        try:
+            screen_width = int(self.root.winfo_screenwidth())
+            screen_height = int(self.root.winfo_screenheight())
+        except (tk.TclError, TypeError, ValueError, AttributeError):
+            self.root.geometry(f"{default_width}x{default_height}")
+            self.root.minsize(min_width, min_height)
+            return
+
+        usable_width = max(800, screen_width - 40)
+        usable_height = max(600, screen_height - 80)
+        window_width = min(default_width, usable_width)
+        window_height = min(default_height, usable_height)
+        safe_min_width = min(min_width, window_width)
+        safe_min_height = min(min_height, window_height)
+        x_pos = max(0, (screen_width - window_width) // 2)
+        y_pos = max(0, (screen_height - window_height) // 2)
+
+        self.root.geometry(f"{window_width}x{window_height}+{x_pos}+{y_pos}")
+        self.root.minsize(safe_min_width, safe_min_height)
+
+    def _fit_startup_geometry_to_content(self):
+        """Resize after widgets exist so the right side is not clipped at startup."""
+        try:
+            self.root.update_idletasks()
+            screen_width = int(self.root.winfo_screenwidth())
+            screen_height = int(self.root.winfo_screenheight())
+            usable_width = max(800, screen_width - 40)
+            usable_height = max(600, screen_height - 80)
+
+            requested_width = int(self.root.winfo_reqwidth())
+            requested_height = int(self.root.winfo_reqheight())
+
+            tree_width = 0
+            if hasattr(self, 'col_widths') and isinstance(self.col_widths, dict):
+                tree_width = sum(int(width) for width in self.col_widths.values()) + 80
+
+            content_width = max(1600, requested_width, tree_width)
+            content_height = max(850, requested_height)
+
+            if content_width > usable_width:
+                self.root.minsize(min(1400, usable_width), min(700, usable_height))
+                try:
+                    self.root.state('zoomed')
+                    return
+                except tk.TclError:
+                    window_width = usable_width
+            else:
+                window_width = content_width
+
+            window_height = min(content_height, usable_height)
+            x_pos = max(0, (screen_width - window_width) // 2)
+            y_pos = max(0, (screen_height - window_height) // 2)
+            self.root.geometry(f"{window_width}x{window_height}+{x_pos}+{y_pos}")
+            self.root.minsize(min(1400, window_width), min(700, window_height))
+        except (tk.TclError, TypeError, ValueError, AttributeError):
+            pass
+
     def __init__(self, root, http_enabled=False, http_port=5000):
         """Initialize the VideoEncoderGUI application.
         
@@ -49,8 +113,7 @@ class VideoEncoderGUI(AppStateAndPathsMixin, DBAndStateLoadMixin, TreeSetupMixin
         
         self.root = root
         self.root.title(t('app_title'))
-        self.root.geometry("1400x900")
-        self.root.minsize(1200, 700)  # Minimum window size to prevent widget clipping
+        self._configure_safe_startup_geometry()
         
         # Default sizes (for responsive layout)
         self.default_entry_width_source = 50  # Source/Dest entry fields
@@ -207,7 +270,7 @@ class VideoEncoderGUI(AppStateAndPathsMixin, DBAndStateLoadMixin, TreeSetupMixin
         
         self.col_widths = {
             '#0': 50, 'denoise': 60, 'hard_rotate': 70, 'video_name': 300, 'status': 200, 'cq': 40, 'vmaf': 40, 'psnr': 50, 'progress': 150,
-            'orig_size': 70, 'new_size': 70, 'size_change': 50, 'duration': 80, 'frames': 80, 'completed_date': 120
+            'orig_size': 70, 'new_size': 70, 'size_change': 50, 'duration': 80, 'frames': 80, 'completed_date': 120, 'preset': 55
         }
         
 
@@ -238,6 +301,10 @@ class VideoEncoderGUI(AppStateAndPathsMixin, DBAndStateLoadMixin, TreeSetupMixin
         self.max_encoded_percent = tk.DoubleVar(value=75.0)  # DoubleVar for fractional percent support
         self.max_encoded_mode = tk.StringVar(value='full')  # 'full' = entire file, 'video' = video track only
         self.svt_preset = tk.IntVar(value=2)
+        # Thread-safe live cache of the SVT preset (plain int, GUI-thread updated).
+        # Worker threads read this so a mid-run preset change applies to encodes that
+        # start afterwards, instead of using the value frozen into the task at queue time.
+        self.current_svt_preset = 2
         self.debug_mode = tk.BooleanVar(value=False)
         self.auto_vmaf_psnr = tk.BooleanVar(value=False)
         self.resize_enabled = tk.BooleanVar(value=False)
@@ -321,6 +388,7 @@ class VideoEncoderGUI(AppStateAndPathsMixin, DBAndStateLoadMixin, TreeSetupMixin
         self.flask_app = None
         
         self.setup_ui()
+        self._fit_startup_geometry_to_content()
 
         # Global audit logging for all user GUI interactions.
         # Entries are written to av1_recompress.log via LOG_WRITER.

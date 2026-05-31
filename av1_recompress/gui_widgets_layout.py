@@ -86,7 +86,7 @@ class WidgetsLayoutMixin:
         svt_preset_frame = ttk.Frame(lang_frame)
         svt_preset_frame.grid(row=6, column=0, columnspan=3, sticky=tk.W, padx=(0, 2), pady=(5, 5))
 
-        self.svt_preset_label = ttk.Label(svt_preset_frame, text='SVT-AV1 Preset:', width=20, anchor=tk.W)
+        self.svt_preset_label = ttk.Label(svt_preset_frame, text=t('svt_preset'), width=20, anchor=tk.W)
         self.svt_preset_label.pack(side=tk.LEFT, padx=(0, 2))
 
         self.svt_preset_slider = ttk.Scale(
@@ -108,7 +108,7 @@ class WidgetsLayoutMixin:
         workers_frame.grid(row=7, column=0, columnspan=3, sticky=tk.W, padx=(0, 2), pady=(5, 5))
     
         # NVENC workers (left side)
-        self.nvenc_workers_label = ttk.Label(workers_frame, text="NVENC:", width=8, anchor=tk.W)
+        self.nvenc_workers_label = ttk.Label(workers_frame, text=t('nvenc_workers_short'), width=8, anchor=tk.W)
         self.nvenc_workers_label.pack(side=tk.LEFT, padx=(0, 2))
     
         self.nvenc_workers_slider = ttk.Scale(
@@ -136,7 +136,7 @@ class WidgetsLayoutMixin:
         self.update_nvenc_workers_label(self.nvenc_worker_count.get())
         
         # SVT-AV1 workers (right side)
-        self.svt_workers_label = ttk.Label(workers_frame, text="SVT:", width=5, anchor=tk.W)
+        self.svt_workers_label = ttk.Label(workers_frame, text=t('svt_workers_short'), width=5, anchor=tk.W)
         self.svt_workers_label.pack(side=tk.LEFT, padx=(0, 2))
     
         self.svt_workers_slider = ttk.Scale(
@@ -483,7 +483,7 @@ class WidgetsLayoutMixin:
         )
         self.max_cq_spinbox.pack(side=tk.LEFT, padx=2)
         
-        self.max_cq_hint_label = ttk.Label(max_cq_frame, text="(0=auto)", font=("Arial", 8))
+        self.max_cq_hint_label = ttk.Label(max_cq_frame, text=t('max_cq_auto_hint'), font=("Arial", 8))
         self.max_cq_hint_label.pack(side=tk.LEFT, padx=2)
         
         # === NOTEBOOK (multiple tabs) ===

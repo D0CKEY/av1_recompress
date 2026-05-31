@@ -241,6 +241,9 @@ class NvencWorkerMixin:
                     invalid_subtitles = task.get('invalid_subtitles') or []
                     item_id = task['item_id']
                     orig_size_str = task['orig_size_str']
+                    # NVENC always encodes av1_nvenc at preset p7 — show/persist it in the Preset column.
+                    if hasattr(self, '_apply_preset_to_row'):
+                        self._apply_preset_to_row(item_id, 'nvenc', 7)
                     initial_min_vmaf = task['initial_min_vmaf']
                     vmaf_step = task['vmaf_step']
                     max_encoded = task['max_encoded']
@@ -624,7 +627,9 @@ class NvencWorkerMixin:
                                 print(t('log_crf_file_check').format(path=video_path_abs))
                             
                             # Max encoded mode check (full video vs video track only)
-                            max_encoded_mode = self.max_encoded_mode.get() if hasattr(self, 'max_encoded_mode') else 'full'
+                            # THREAD-SAFETY: read from pre-cached task dict, NOT self.max_encoded_mode.get()
+                            # (calling tkinter Var.get() from this worker thread risks a Tcl mutex deadlock)
+                            max_encoded_mode = task.get('max_encoded_mode', 'full')
                             
                             # Denoise size correction
                             # FONTOS: Az ab-av1 a max-encoded százalékot a VIDEÓSTREAM méretére vonatkoztatja!
@@ -687,7 +692,7 @@ class NvencWorkerMixin:
                                         effective_max_encoded = round(effective_max_encoded, 2)
                                         effective_max_encoded = max(0.01, effective_max_encoded)
                                         
-                                        mode_label = "Videósáv" if max_encoded_mode == 'video' else "Teljes videó"
+                                        mode_label = t('max_encoded_mode_video') if max_encoded_mode == 'video' else t('max_encoded_mode_full')
                                         with console_redirect(nvenc_logger):
                                             print(f"⚖ Zajszűrés méret korrekció ({mode_label} mód):")
                                             print(f"   Eredeti: {orig_size/(1024**2):.1f} MB, Videó: {original_video_size/(1024**2):.1f} MB")
@@ -732,7 +737,7 @@ class NvencWorkerMixin:
                                 with console_redirect(nvenc_logger):
                                     print(f"⚖ Videósáv mód: ab-av1 max-encoded-percent: {max_encoded}% (korrekció nélkül)")
 
-                            cq_result_nvenc = run_crf_search(crf_search_source, encoder='av1_nvenc', initial_min_vmaf=initial_min_vmaf, vmaf_step=vmaf_step, max_encoded_percent=effective_max_encoded, progress_callback=status_callback, logger=nvenc_logger, stop_event=video_stop_event, crf_increment=int(self.crf_increment.get()))
+                            cq_result_nvenc = run_crf_search(crf_search_source, encoder='av1_nvenc', initial_min_vmaf=initial_min_vmaf, vmaf_step=vmaf_step, max_encoded_percent=effective_max_encoded, progress_callback=status_callback, logger=nvenc_logger, stop_event=video_stop_event, crf_increment=int(task.get('crf_increment', 1)))
                             print(f"[OK] NVENC CRF search done: {cq_result_nvenc}")
                     except FileNotFoundError as e:
                         # Ab-av1.exe not found - fatal error
@@ -945,7 +950,7 @@ class NvencWorkerMixin:
                         try:
                             if not is_app_closing() and self.root.winfo_exists():
                                 self.root.after(0, lambda: messagebox.showerror(
-                                    "FATAL ERROR",
+                                    t('fatal_error_title'),
                                     error_msg
                                 ))
                                 # Várunk egy kicsit, hogy a MessageBox megjelenjen
@@ -1517,7 +1522,8 @@ class NvencWorkerMixin:
                         nvenc_master_cleanup = task.get('denoised_master_path_for_cleanup', None)
                         # Preserve master for VMAF/PSNR if it will be needed
                         if denoised_master_path and denoised_master_path.exists():
-                            vmaf_will_run = (manual_quality_check and manual_quality_check != 'none') or (hasattr(self, 'auto_vmaf_psnr') and self.auto_vmaf_psnr.get())
+                            # THREAD-SAFETY: read auto_vmaf_psnr from pre-cached task dict, NOT the tkinter Var
+                            vmaf_will_run = (manual_quality_check and manual_quality_check != 'none') or bool(task.get('auto_vmaf_psnr', False))
                             if vmaf_will_run:
                                 keep_denoised_master = True
                         self.mark_encoding_completed(
@@ -1720,6 +1726,9 @@ class NvencWorkerMixin:
                     invalid_subtitles = task.get('invalid_subtitles') or []
                     item_id = task['item_id']
                     orig_size_str = task['orig_size_str']
+                    # NVENC always encodes av1_nvenc at preset p7 — show/persist it in the Preset column.
+                    if hasattr(self, '_apply_preset_to_row'):
+                        self._apply_preset_to_row(item_id, 'nvenc', 7)
                     target_cq = task['target_cq']
                     vmaf_value = task.get('vmaf_value', None)
                     # CRITICAL FIX: Use current resize settings if not explicitly set in task

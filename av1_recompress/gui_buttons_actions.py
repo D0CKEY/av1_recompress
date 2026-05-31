@@ -4,14 +4,14 @@ from .gui_shared import *
 class ButtonsActionsMixin:
     def browse_source(self):
         """Open directory browser for source folder selection."""
-        folder = filedialog.askdirectory(title="Source Folder")
+        folder = filedialog.askdirectory(title=t('dialog_select_source_folder'))
         if folder:
             self.source_entry.delete(0, tk.END)
             self.source_entry.insert(0, folder)
 
     def browse_dest(self):
         """Open directory browser for destination folder selection."""
-        folder = filedialog.askdirectory(title="Destination Folder")
+        folder = filedialog.askdirectory(title=t('dialog_select_dest_folder'))
         if folder:
             self.dest_entry.delete(0, tk.END)
             self.dest_entry.insert(0, folder)
@@ -215,7 +215,7 @@ class ButtonsActionsMixin:
     def show_debug_dialog(self, current_step, next_step, file_info, continue_event):
         """Debug dialog with countdown timer."""
         dialog = tk.Toplevel(self.root)
-        dialog.title("[STOP] Debug Mode")
+        dialog.title(t('debug_dialog_title'))
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -234,25 +234,25 @@ class ButtonsActionsMixin:
         content_frame = ttk.Frame(scrollable_frame, padding="20")
         content_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(content_frame, text="[STOP] DEBUG STOP", font=("Arial", 16, "bold")).pack(pady=10)
+        ttk.Label(content_frame, text=t('debug_dialog_header'), font=("Arial", 16, "bold")).pack(pady=10)
         
         # Countdown timer label
         countdown_label = ttk.Label(
             content_frame, 
-            text="⏰ Auto-continue in: 60 seconds", 
+            text=t('debug_dialog_auto_continue').format(seconds=60), 
             font=("Arial", 11, "bold"), 
             foreground="orange"
         )
         countdown_label.pack(pady=(0, 10))
         
-        ttk.Label(content_frame, text="Current:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        ttk.Label(content_frame, text=t('debug_dialog_current'), font=("Arial", 10, "bold")).pack(anchor=tk.W)
         ttk.Label(content_frame, text=current_step, wraplength=550, foreground="blue").pack(anchor=tk.W, pady=5)
         
-        ttk.Label(content_frame, text="Next:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(10,0))
+        ttk.Label(content_frame, text=t('debug_dialog_next'), font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(10,0))
         ttk.Label(content_frame, text=next_step, wraplength=550, foreground="green").pack(anchor=tk.W, pady=5)
         
         if file_info:
-            ttk.Label(content_frame, text="Info:", font=("Arial", 9, "italic")).pack(anchor=tk.W, pady=(10,0))
+            ttk.Label(content_frame, text=t('debug_dialog_info'), font=("Arial", 9, "italic")).pack(anchor=tk.W, pady=(10,0))
             ttk.Label(content_frame, text=file_info, wraplength=550, foreground="gray").pack(anchor=tk.W, pady=5)
         
         button_frame = ttk.Frame(dialog, padding="10")
@@ -283,7 +283,7 @@ class ButtonsActionsMixin:
                 if remaining <= 0:
                     # Timeout reached - auto-continue
                     countdown_label.config(
-                        text="⏰ Timeout reached - continuing...",
+                        text=t('debug_dialog_timeout'),
                         foreground="red"
                     )
                     dialog.update_idletasks()
@@ -292,7 +292,7 @@ class ButtonsActionsMixin:
                 else:
                     # Update countdown display
                     countdown_label.config(
-                        text=f"⏰ Auto-continue in: {remaining} second{'s' if remaining != 1 else ''}",
+                        text=t('debug_dialog_auto_continue').format(seconds=remaining),
                         foreground="orange" if remaining > 10 else "red"
                     )
                     # Schedule next update
@@ -301,7 +301,7 @@ class ButtonsActionsMixin:
                 # Dialog was destroyed - stop updating
                 pass
         
-        ttk.Button(button_frame, text="▶ Continue", command=on_continue, width=20).pack()
+        ttk.Button(button_frame, text=t('debug_dialog_continue'), command=on_continue, width=20).pack()
         
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -464,9 +464,9 @@ class ButtonsActionsMixin:
         result = messagebox.askyesno(
             t('context_multi_manual_reencode_menu'),
             f"{t('msg_reencode_confirm_bulk').format(count=len(item_ids))}\n\n"
-            f"Encoder: {encoder_type_str}\n"
+            f"{t('label_encoder')}: {encoder_type_str}\n"
             f"CQ/CRF: {target_cq} ({cq_range})\n"
-            f"Minőség ellenőrzés: {quality_check_display}\n\n"
+            f"{t('label_quality_check')}: {quality_check_display}\n\n"
             f"{t('msg_reencode_confirm_bulk_note')}"
         )
         

@@ -436,6 +436,44 @@ class ContextMenusMixin:
                     action='refresh_metadata_multiple'
                 )
             )
+
+            # Bulk denoise - applies the chosen level to every selected video.
+            # bulk_toggle_denoise() handles pending/completed/active rows smartly with one
+            # aggregated confirmation (completed outputs are deleted + re-encoded).
+            menu.add_separator()
+            denoise_multi_menu = tk.Menu(menu, tearoff=0)
+            denoise_multi_options = [
+                (4, t('menu_denoise_ultra_strong')),
+                (3, t('menu_denoise_very_strong')),
+                (1, t('menu_denoise_strong')),
+                (2, t('menu_denoise_light')),
+            ]
+            for level, label_text in denoise_multi_options:
+                denoise_multi_menu.add_command(
+                    label=label_text,
+                    command=multi_menu_cmd(
+                        f"{t('menu_denoise_multi').format(count=len(selected_video_items))} / {label_text}",
+                        lambda items=selected_video_items, lvl=level: self.bulk_toggle_denoise(items, lvl),
+                        action='bulk_toggle_denoise',
+                        denoise_level=level
+                    )
+                )
+            denoise_multi_menu.add_separator()
+            disable_multi_label = t('menu_denoise_disable')
+            denoise_multi_menu.add_command(
+                label=disable_multi_label,
+                command=multi_menu_cmd(
+                    f"{t('menu_denoise_multi').format(count=len(selected_video_items))} / {disable_multi_label}",
+                    lambda items=selected_video_items: self.bulk_toggle_denoise(items, 0),
+                    action='bulk_toggle_denoise',
+                    denoise_level=0
+                )
+            )
+            menu.add_cascade(
+                label=t('menu_denoise_multi').format(count=len(selected_video_items)),
+                menu=denoise_multi_menu
+            )
+
             if menu.index('end') is not None:
                 menu.post(event.x_root, event.y_root)
             return
@@ -1424,13 +1462,102 @@ class ContextMenusMixin:
         except (tk.TclError, KeyError, AttributeError, TypeError, ValueError) as e:
             print(f"Error setting hard rotate: {e}")
 
-    def toggle_denoise(self, item_id, video_path, denoise_level):
+    def bulk_toggle_denoise(self, item_ids, denoise_level):
+        """Apply a denoise level to several selected videos at once.
+
+        Categorizes the selection into pending / actively-encoding / completed rows,
+        shows ONE aggregated confirmation (only when destructive rows are involved:
+        completed ones get their output deleted + re-encoded, active ones get stopped +
+        requeued), then delegates each row to toggle_denoise(..., confirmed=True) so the
+        existing per-category logic is reused without duplication.
+
+        Args:
+            item_ids: Iterable of Treeview item IDs (subtitle rows are ignored).
+            denoise_level: 0=disabled, 1=strong, 2=light, 3=very-strong, 4=ultra-strong
+        """
+        denoise_level = normalize_denoise_level(denoise_level)
+
+        pending, active, completed = [], [], []
+        for item_id in item_ids:
+            try:
+                tags = self.tree.item(item_id, 'tags') or ()
+                if 'subtitle' in tags:
+                    continue
+                video_path = self._get_video_path_by_item(item_id)
+                if not video_path:
+                    continue
+                values = self.tree.item(item_id, 'values')
+                status = values[self.COLUMN_INDEX['status']] if len(values) > self.COLUMN_INDEX['status'] else ""
+            except (tk.TclError, KeyError, AttributeError):
+                continue
+
+            is_active = False
+            try:
+                is_active = bool(self._is_video_actively_encoding(video_path)[0])
+            except Exception:
+                is_active = False
+
+            entry = (item_id, video_path)
+            if is_active:
+                active.append(entry)
+            elif is_status_completed(status):
+                completed.append(entry)
+            else:
+                pending.append(entry)
+
+        all_entries = pending + completed + active
+        if not all_entries:
+            return
+
+        denoise_label_map = {
+            0: t('menu_denoise_disable'),
+            1: t('menu_denoise_strong'),
+            2: t('menu_denoise_light'),
+            3: t('menu_denoise_very_strong'),
+            4: t('menu_denoise_ultra_strong'),
+        }
+        denoise_label = denoise_label_map.get(denoise_level, "*")
+
+        # Only prompt when destructive rows (completed/active) are involved; a pure
+        # pending selection is non-destructive, just like the single-item toggle.
+        if completed or active:
+            lines = []
+            if pending:
+                lines.append(t('denoise_multi_line_pending').format(count=len(pending)))
+            if completed:
+                lines.append(t('denoise_multi_line_completed').format(count=len(completed)))
+            if active:
+                lines.append(t('denoise_multi_line_active').format(count=len(active)))
+            msg = "{0}\n\n{1}\n\n{2}".format(
+                t('denoise_multi_header').format(count=len(all_entries), denoise=denoise_label),
+                "\n".join(lines),
+                t('denoise_multi_footer')
+            )
+            if not messagebox.askokcancel(t('msg_confirm_reencode_title'), msg):
+                return
+
+        self._write_main_log_line(
+            f"[context_menu] Bulk denoise requested | count={len(all_entries)} "
+            f"(pending={len(pending)}, completed={len(completed)}, active={len(active)}) "
+            f"| level={denoise_level} ({denoise_label})"
+        )
+
+        for item_id, video_path in all_entries:
+            try:
+                self.toggle_denoise(item_id, video_path, denoise_level, confirmed=True)
+            except Exception as e:
+                self.log_status(f"[WARN] Bulk denoise failed for {getattr(video_path, 'name', video_path)}: {e}")
+
+    def toggle_denoise(self, item_id, video_path, denoise_level, confirmed=False):
         """Toggle denoise setting for a video and save to DB immediately.
-        
+
         Args:
             item_id: The Treeview item ID
             video_path: The Path to the video file
             denoise_level: 0=disabled, 1=strong, 2=light, 3=very-strong, 4=ultra-strong
+            confirmed: When True, suppresses the per-item confirmation dialogs (active
+                stop+requeue and completed delete+re-encode). Used by bulk_toggle_denoise(),
+                which already asks for one aggregated confirmation up front.
         """
         denoise_level = normalize_denoise_level(denoise_level)
 
@@ -1484,12 +1611,13 @@ class ContextMenusMixin:
                 }
                 denoise_label = denoise_label_map.get(denoise_level, "*")
 
-                confirm_msg = t('msg_confirm_stop_and_reencode_denoise').format(
-                    filename=video_path.name,
-                    denoise=denoise_label
-                )
-                if not messagebox.askokcancel(t('msg_confirm_reencode_title'), confirm_msg):
-                    return
+                if not confirmed:
+                    confirm_msg = t('msg_confirm_stop_and_reencode_denoise').format(
+                        filename=video_path.name,
+                        denoise=denoise_label
+                    )
+                    if not messagebox.askokcancel(t('msg_confirm_reencode_title'), confirm_msg):
+                        return
 
                 self.log_status(f"[INFO] Active denoise change requested -> stop and requeue: {video_path.name} -> {denoise_label}")
                 self._write_main_log_line(
@@ -1497,7 +1625,7 @@ class ContextMenusMixin:
                 )
 
                 if not hasattr(self, 'stop_encoding_for_video'):
-                    messagebox.showerror(t('msg_error'), f"Failed to restart encoding for: {video_path.name}")
+                    messagebox.showerror(t('msg_error'), t('msg_restart_encoding_failed').format(filename=video_path.name))
                     return
 
                 current_values_snapshot = list(current_values)
@@ -1548,12 +1676,12 @@ class ContextMenusMixin:
                         self.log_status(f"[INFO] Denoise active restart requested: {video_path.name}")
                         stop_success = self.stop_encoding_for_video(video_path, cleanup_denoised_master=False)
                         if not stop_success:
-                            _show_restart_error_async(f"Failed to restart encoding for: {video_path.name}")
+                            _show_restart_error_async(t('msg_restart_encoding_failed').format(filename=video_path.name))
                             return
 
                         if not self._wait_for_video_stop_completion(video_path):
                             self.log_status(f"[WARN] Denoise restart timeout waiting for stop-event cleanup: {video_path.name}")
-                            _show_restart_error_async(f"Failed to restart encoding for: {video_path.name}")
+                            _show_restart_error_async(t('msg_restart_encoding_failed').format(filename=video_path.name))
                             return
 
                         queue_type = active_queue_type_snapshot
@@ -1694,7 +1822,7 @@ class ContextMenusMixin:
                                 self._ensure_nvenc_workers_running()
 
                         if not queued:
-                            _show_restart_error_async(f"Failed to restart encoding for: {video_path.name}")
+                            _show_restart_error_async(t('msg_restart_encoding_failed').format(filename=video_path.name))
                             return
 
                         self.log_status(f"[OK] Denoise active restart queued: {video_path.name} -> {new_status_text}")
@@ -1704,7 +1832,7 @@ class ContextMenusMixin:
                         print(f"Error in denoise restart worker: {worker_error}")
                         import traceback
                         traceback.print_exc()
-                        _show_restart_error_async(f"Failed to restart encoding for: {video_path.name}")
+                        _show_restart_error_async(t('msg_restart_encoding_failed').format(filename=video_path.name))
 
                 import threading
                 threading.Thread(target=_restart_active_encoding_worker, daemon=True, name="DenoiseActiveRestart").start()
@@ -1721,8 +1849,8 @@ class ContextMenusMixin:
             is_completed = is_status_completed(status)
             
             if is_completed:
-                # Ask callback confirmation
-                if not messagebox.askokcancel(t('msg_confirm_reencode_title'), t('msg_confirm_reencode_denoise')):
+                # Ask callback confirmation (skipped when called from bulk_toggle_denoise)
+                if not confirmed and not messagebox.askokcancel(t('msg_confirm_reencode_title'), t('msg_confirm_reencode_denoise')):
                     return
                     
                 # Delete output file
@@ -2249,11 +2377,22 @@ class ContextMenusMixin:
                 denoise_val = sidecar_denoise_val
         denoise_str = denoise_level_to_display(denoise_val)
 
+        # Preset: read from the output's Settings metadata ("... - Preset N - ..."), fall
+        # back to whatever was previously stored. Cleared when the output is gone (retry).
+        output_preset = parse_preset_from_settings(output_settings_str)
+        if reset_failed_for_retry:
+            preset_display = "-"
+            preset_for_meta = None
+        else:
+            preset_for_meta = output_preset if output_preset is not None else self.get_tree_item_meta(item_id, 'encoder_preset')
+            preset_encoder = output_encoder_type or self.get_tree_item_meta(item_id, 'output_encoder_type')
+            preset_display = format_preset_display(preset_encoder, preset_for_meta)
+
         self.tree.item(item_id, values=(
             denoise_str, hard_rotate_display, video_name_display,
             status_text, cq_str, vmaf_str, psnr_str, progress_text,
             orig_size_str, new_size_str, change_str,
-            duration_str, frames_str, completed_date
+            duration_str, frames_str, completed_date, preset_display
         ))
         self.tree.item(item_id, tags=(self._get_metadata_refresh_tag_for_status(status_text),))
 
@@ -2279,6 +2418,8 @@ class ContextMenusMixin:
         if output_encoder_type:
             meta_update['encoder_type'] = output_encoder_type
             meta_update['output_encoder_type'] = output_encoder_type
+        if preset_for_meta not in (None, '', '-'):
+            meta_update['encoder_preset'] = str(preset_for_meta)
         if output_duration_seconds:
             meta_update['output_duration_seconds'] = output_duration_seconds
         if output_frame_count:
@@ -2314,6 +2455,7 @@ class ContextMenusMixin:
                 'output_fps',
                 'encoder_type',
                 'output_encoder_type',
+                'encoder_preset',
                 'cq',
                 'vmaf',
                 'psnr'

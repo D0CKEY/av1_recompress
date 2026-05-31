@@ -1047,6 +1047,40 @@ def extract_settings_from_file(file_path):
         return ""
 
 
+def parse_preset_from_settings(settings_str):
+    """Extract the encoder preset integer from an output 'Settings' metadata string.
+
+    The encoder writes e.g. "FFMPEG SVT-AV1 - CRF:30 - Preset 3 - ..." or
+    "FFMPEG NVENC - CQ:28 - Preset 7 - ...". Returns the preset integer or None.
+    """
+    if not settings_str:
+        return None
+    match = re.search(r'Preset[:\s]+(\d+)', settings_str, re.IGNORECASE)
+    if match:
+        try:
+            return int(match.group(1))
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def format_preset_display(encoder_type, preset_value):
+    """Human-readable preset cell for the tree column.
+
+    NVENC -> 'pN' (e.g. p7), SVT-AV1/other -> 'N'. Empty/None -> '-'.
+    """
+    if preset_value in (None, '', '-'):
+        return '-'
+    try:
+        preset_int = int(float(preset_value))
+    except (ValueError, TypeError):
+        return '-'
+    encoder = (encoder_type or '').lower()
+    if 'nvenc' in encoder:
+        return f'p{preset_int}'
+    return str(preset_int)
+
+
 def extract_all_global_tags(file_path):
     """Extract all global tags (format tags) from file using FFprobe.
     
@@ -4198,6 +4232,15 @@ def get_video_extra_metadata(video_path):
                 vs['bit_rate'] = int(vs['size_bytes'] * 8 / duration_seconds)
             except Exception:
                 pass
+
+    if duration_seconds and duration_seconds > 0:
+        for stream_type in ('audio', 'subtitle'):
+            for stream in streams.get(stream_type) or []:
+                if not stream.get('bit_rate') and stream.get('size_bytes'):
+                    try:
+                        stream['bit_rate'] = int(stream['size_bytes'] * 8 / duration_seconds)
+                    except Exception:
+                        pass
 
     _dt = (time.time() - _t0) * 1000
     _br_src = 'calculated' if (file_size and duration_seconds and duration_seconds > 0) else 'ffprobe_fallback' if bit_rate else 'none'
